@@ -1,0 +1,8 @@
+# 权重不进仓库
+*.safetensors
+*.ckpt
+*.pt
+# 私人原图
+*.jpg
+*.jpeg
+!samples/*.png
