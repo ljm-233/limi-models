@@ -22,6 +22,7 @@ ljm 和米鱼一起养的模型配置库。`limi` = ljm + miyu。
 | 嗷呜虎虎 | v5.3 | 结构最松，弃用 | `seo_v5.3.safetensors` 54MB |
 | 嗷呜虎虎 | v5.4 | 画质最好，脸最立体（现主力） | `aowo_huhu_v5.4.safetensors` 54MB |
 | 马吉 Machi | v1 | 第二个人，两套 cos 素材（714 张） | `machi_v1.safetensors` 52MB |
+| 马吉 Machi | v2 | 原生分辨率重切（729 张），结构更稳 | `machi_v2.safetensors` 52MB |
 
 两版权重都在 `~/ComfyUI/models/loras/`，不进本库。
 
