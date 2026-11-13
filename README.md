@@ -8,8 +8,12 @@ ljm 和米鱼一起养的模型配置库。`limi` = ljm + miyu。
 
 | 模型 | 版本 | 定位 | 权重 |
 | --- | --- | --- | --- |
+| 嗷呜虎虎 | v5 | 起点，衣服成型但脸弱 | `seo_v5.safetensors` 26MB |
 | 嗷呜虎虎 | v5.1 | 稳，出错率最低 | `seo_v5.1.safetensors` 52MB |
-| 嗷呜虎虎 | v5.4 | 画质最好，脸最立体 | `aowo_huhu_v5.4.safetensors` 52MB |
+| 嗷呜虎虎 | v5.2 | 细节最强，脸被稀释 | `seo_v5.2.safetensors` 78MB |
+| 嗷呜虎虎 | v5.3 | 结构最松，弃用 | `seo_v5.3.safetensors` 78MB |
+| 嗷呜虎虎 | v5.4 | 画质最好，脸最立体（现主力） | `aowo_huhu_v5.4.safetensors` 52MB |
+| 马吉 Machi | v1 | 第二个人，两套 cos 素材 | 训练中 |
 
 两版权重都在 `~/ComfyUI/models/loras/`，不进本库。
 
