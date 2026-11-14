@@ -74,3 +74,9 @@ limi-models/
 ## 备注
 
 仓库目前只在本地 `~/.dsh/miyu/limi-models`，没有远端。要推 GitHub 先说一声，公开还是私有也一起定。
+
+## 工具
+
+| 工具 | 作用 |
+| --- | --- |
+| [`tools/train-status`](tools/train-status/) | 训练监视器浮窗：六页信息、四档自适应尺寸、图片页与 imv 同步翻图 |
