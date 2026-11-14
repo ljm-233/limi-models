@@ -22,6 +22,7 @@ import urllib.request
 import fcntl
 import csv
 import hashlib
+import shutil
 import collections
 
 HOME = "/home/link"
@@ -679,7 +680,20 @@ def open_viewer(idx=0):
                    timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def thumb(path, cols, rows):
+THUMB_W, THUMB_H = 1280, 800          # 缩略图缓存固定这个尺寸，与窗口大小无关
+
+
+def thumb(path):
+    """缓存键只跟文件本身有关；显示时由 kitty 按窗口格数缩放，换窗口大小不用重做"""
+    try:
+        st = os.stat(path)
+        key = f"thumb{THUMB_W}x{THUMB_H}|{path}|{st.st_mtime_ns}"
+    except Exception:
+        key = f"thumb{THUMB_W}x{THUMB_H}|{path}"
+    return os.path.join(THUMB_DIR, hashlib.sha1(key.encode()).hexdigest() + ".png")
+
+
+def _legacy_thumb(path, cols, rows):
     try:
         st = os.stat(path)
         key = f"{path}|{st.st_mtime_ns}|{cols}x{rows}"
@@ -694,14 +708,19 @@ def kitty_img(path, cols, rows, row=1):
     try:
         from PIL import Image
         import io, base64
-        tp = thumb(path, cols, rows)
+        tp = thumb(path)
+        if not os.path.exists(tp):                       # 老缓存（按窗口尺寸建的）能借就借
+            for legacy in (_legacy_thumb(path, 46, 14), _legacy_thumb(path, 60, 22)):
+                if os.path.exists(legacy):
+                    shutil.copyfile(legacy, tp)
+                    break
         png = open(tp, "rb").read() if os.path.exists(tp) else None
         if png is None:
             os.makedirs(THUMB_DIR, exist_ok=True)
             im = Image.open(path)
-            im.draft("RGB", (cols * 44, rows * 88))
+            im.draft("RGB", (THUMB_W * 2, THUMB_H * 2))
             im = im.convert("RGB")
-            im.thumbnail((cols * 22, rows * 44), Image.LANCZOS)
+            im.thumbnail((THUMB_W, THUMB_H), Image.LANCZOS)
             buf = io.BytesIO()
             im.save(buf, format="PNG")
             png = buf.getvalue()
@@ -711,8 +730,8 @@ def kitty_img(path, cols, rows, row=1):
         parts = [data[i:i + 3800] for i in range(0, len(data), 3800)]
         out = [f"\033[{row};1H"]
         for i, ch in enumerate(parts):
-            head = "a=T,f=100," + (f"c={cols},r={rows}," if i == 0 else "")
-            out.append(f"\033_G{head}C=1,q=2,m={0 if i == len(parts) - 1 else 1};{ch}\033\\")
+            head = f"a=T,f=100,c={cols},r={rows}," + ("C=1,q=2," if True else "")
+            out.append(f"\033_G{head}m={0 if i == len(parts) - 1 else 1};{ch}\033\\")
         return "".join(out)
     except Exception:
         return ""
