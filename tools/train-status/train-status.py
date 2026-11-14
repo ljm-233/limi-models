@@ -266,9 +266,12 @@ def parse(text):
 
 
 def progress():
-    """日志被 Python 缓冲时步数会滞后，这时用最新存档的步数兜底"""
+    """日志被 Python 缓冲时步数会滞后，这时用最新存档的步数兜底
+    注意：兜底步数只用来显示，不参与翻轮判定，否则轮次会算多"""
     p = last_log()
     step, total, rate, losses = cache("parse:" + str(p), 0.5, lambda: parse(log_text(p)))
+    log_step = step
+    src = "log"
     try:
         stale = p and time.time() - os.path.getmtime(p) > 60
     except Exception:
@@ -280,8 +283,8 @@ def progress():
             if m:
                 best = max(best, int(m.group(1)))
         if best and (step is None or best > step):
-            step = best
-    return step, total, rate, losses
+            step, src = best, "ckpt"
+    return step, total, rate, losses, log_step, src
 
 
 def stage():
@@ -296,6 +299,16 @@ def stage():
 
 EPOCH_FILE = f"{TRAIN}/.epoch_cur"
 LASTSTEP_FILE = f"{TRAIN}/.last_step"
+
+
+def absolute_mode(step, total):
+    """日志里的 total 等于脚本的 max_train_steps，说明它报的是全局步数"""
+    ms = max_steps()
+    return bool(ms and total and abs(total - ms) <= 1)
+
+
+def epochs_of(step, per):
+    return (step // per + 1) if (step and per) else 0
 
 
 def max_steps():
@@ -415,8 +428,11 @@ def page_flow(step, total, n_img, st, rate):
     cnt = lambda pat, ttl=60: cache("n:" + pat, ttl, lambda: len(glob.glob(pat)))
     cut = cnt(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")
     tag = cnt(f"{TRAIN}/captions_wd14/*.txt")
-    ep = epoch_cur(step, n_img) if (step and n_img) else 0
-    rnd = -(-max_steps() // n_img) if (n_img and max_steps()) else 0
+    ls = log_step if log_step is not None else step
+    if absolute_mode(step, total):
+        ep = epochs_of(step, n_img)
+    else:
+        ep = epoch_cur(ls, n_img) if (ls and n_img) else 0
     train_dur = _dur(step / rate) if (step and rate and st == "训练") else times.get("训练", "x")
     rows = [
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "x")),
@@ -784,12 +800,15 @@ def cycle_size(step):
 
 
 # ── 排版 ───────────────────────────────────────────────
-def header(st, step, total, n_img):
+def header(st, step, total, n_img, log_step=None):
     name = read(f"{TRAIN}/.project_name", "马吉 v3").strip() or "马吉 v3"
-    ep = epoch_cur(step, n_img) if (step and n_img) else 0
-    rnd = -(-max_steps() // n_img) if (n_img and max_steps()) else 0
+    ls = log_step if log_step is not None else step
+    if absolute_mode(step, total):
+        ep = epochs_of(step, n_img)
+    else:
+        ep = epoch_cur(ls, n_img) if (ls and n_img) else 0
     color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
-    tail = f" {color}{st}{R}" + (f" {WH}{ep}/{rnd}轮{R}" if rnd else "")
+    tail = f" {color}{st}{R}" + (f" {WH}第{ep}轮{R}" if ep else "")
     tail += f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
     return f"{GRN}●{R} {WH}{name}{R} {DIM}{time.strftime('%H:%M:%S')}{R}{tail}"
 
@@ -814,12 +833,12 @@ def bottom(step, total, rate, W):
 
 
 def compact(W, state, H):
-    step, total, rate, losses = progress()
+    step, total, rate, losses, log_step, src = progress()
     st = cache("stage", 2.0, stage)
     n_img = imgs_per_epoch()
     view = state["view"]
     _CUR_VIEW[0] = view
-    rows = [(1, header(st, step, total, n_img))]
+    rows = [(1, header(st, step, total, n_img, log_step))]
     body = []
     if view == 1:
         body = page_flow(step, total, n_img, st, rate)
@@ -840,8 +859,14 @@ def compact(W, state, H):
         rows.append((r, line))
         r += 2
     per, ms = n_img, max_steps()
-    if per and ms:
-        done = (max(1, epoch_cur(step, per)) - 1) * per + (step or 0)
+    if absolute_mode(step, total):
+        b = bottom(min(step or 0, total or 0), total, rate, W)
+    elif per and ms:
+        if src == "ckpt":
+            done = min(ms, step or 0)          # 存档步数本身就是全局步数
+        else:
+            ep_now = max(1, epoch_cur(log_step or step, per))
+            done = min(ms, (ep_now - 1) * per + (step or 0))
         b = bottom(done, ms, rate, W)
     else:
         b = bottom(step, total, rate, W)
@@ -885,7 +910,7 @@ def tsize():
 
 
 def micro(W):
-    step, total, rate, losses = progress()
+    step, total, rate, losses, _, _ = progress()
     if step and total and rate:
         txt = f"{step * 100 // total}% {int((total - step) / rate) // 60}m"
         if losses:
