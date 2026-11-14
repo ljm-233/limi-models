@@ -428,17 +428,16 @@ def page_flow(step, total, n_img, st, rate):
     cnt = lambda pat, ttl=60: cache("n:" + pat, ttl, lambda: len(glob.glob(pat)))
     cut = cnt(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")
     tag = cnt(f"{TRAIN}/captions_wd14/*.txt")
-    ls = log_step if log_step is not None else step
     if absolute_mode(step, total):
         ep = epochs_of(step, n_img)
     else:
-        ep = epoch_cur(ls, n_img) if (ls and n_img) else 0
+        ep = epoch_cur(step, n_img) if (step and n_img) else 0
     train_dur = _dur(step / rate) if (step and rate and st == "训练") else times.get("训练", "x")
     rows = [
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "x")),
         ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "x")),
         ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "x")),
-        ("训练", f"{ep}/{rnd}轮" if rnd else "", train_dur),
+        ("训练", f"第{ep}轮" if ep else "", train_dur),
         ("出图", "4 张样图", times.get("出图", "x")),
         ("评分", "相似度+纹理", times.get("评分", "x")),
     ]
