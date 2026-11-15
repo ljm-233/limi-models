@@ -942,12 +942,21 @@ def kitty_img(path, cols, rows, row=1, px=None):
             os.replace(tp + ".tmp", tp)
         data = base64.standard_b64encode(png).decode("ascii")
         parts = [data[i:i + 3800] for i in range(0, len(data), 3800)]
+        n = len(parts)
         out = [f"\033[{row};1H"]
         for i, ch in enumerate(parts):
-            head = f"a=T,f=100,c={cols},r={rows},C=1,q=2,"
-            out.append(f"\033_G{head}m={0 if i == len(parts) - 1 else 1};{ch}\\")
+            more = 0 if i == n - 1 else 1
+            if i == 0:      # 只有第一块带完整参数，后续块只带 m 和负载
+                head = f"a=T,f=100,c={cols},r={rows},C=1,q=2,m={more}"
+            else:
+                head = f"m={more}"
+            out.append(f"\033_G{head};{ch}\033\\")
         return "".join(out)
-    except Exception:
+    except Exception as e:
+        try:
+            open("/tmp/ts_img.err", "a").write(f"{type(e).__name__}: {e}\n")
+        except Exception:
+            pass
         return ""
 
 
@@ -1173,7 +1182,12 @@ def main():
     except Exception:
         pass
     W, H = tsize()
-    state = {"view": 0, "paused": False, "proc": False, "img_idx": load_pos()}
+    try:
+        start_view = int(os.environ.get("TRAIN_STATUS_VIEW", "0") or 0)
+    except Exception:
+        start_view = 0
+    state = {"view": max(0, min(5, start_view)), "paused": False, "proc": False,
+             "img_idx": load_pos()}
     keys = os.environ.get("TRAIN_STATUS_KEYS", "all")     # all | noq
     mouse = os.environ.get("TRAIN_STATUS_MOUSE", "1") != "0"
     fd = sys.stdin.fileno()
