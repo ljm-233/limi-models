@@ -406,11 +406,22 @@ def idle_now():
     return age is None or age > 600
 
 
+def crop_progress():
+    """无损切图进度：已出 PNG / 预计总数（1409 张原图 × 4 类）"""
+    try:
+        n = len(glob.glob(f"{TRAIN}/dataset_v3_png/10_machi/*.png"))
+    except Exception:
+        n = 0
+    return n, 5636
+
+
 def stage():
     if alive("train_network"):
         return "训练"
     if alive("gen_detail") or alive("gen_face"):
         return "出图"
+    if alive("build_base_png"):
+        return "切图"
     if alive("eval_faces"):
         return "评分"
     if idle_now():
@@ -821,7 +832,11 @@ def page_flow(step, total, n_img, st, rate):
 
     lw = latest_weight()
     lw_name = os.path.basename(lw[0]).rsplit(".", 1)[0] if lw else ""
-    train_dur = stage_time("训练") or times.get("训练", "—")
+    train_dur = "—"
+    if st == "训练":
+        train_dur = stage_time("训练") or times.get("训练", "—")
+    elif st in ("出图", "评分", "完成"):
+        train_dur = stage_time("训练") or times.get("训练", "—")
     if st == "训练" and not (step and rate):
         train_dur = "等缓存"
     elif st == "训练" and step and rate:
@@ -832,7 +847,8 @@ def page_flow(step, total, n_img, st, rate):
 
     rows = [
         ("扫描", f"{src} 张原图" if src else "", stage_time("扫描") or times.get("扫描", "—")),
-        ("切图", f"{cut} 张裁片" if cut else "", stage_time("切图") or times.get("切图", "—")),
+        ("切图", (f"无损 {crop_progress()[0]} 张" if st == "切图" else (f"{cut} 张裁片" if cut else "")),
+         stage_time("切图") or times.get("切图", "—")),
         ("打标", f"{tag} 条描述" if tag else "", stage_time("打标") or times.get("打标", "—")),
         ("缓存", _cache_sub(), stage_time("缓存") or "—"),
         ("训练", train_sub, train_dur),
@@ -1519,7 +1535,12 @@ def compact(W, state, H):
         rows.append((r, line))
         r += gap
     # 底部给整体进度：累计批次 vs 总批次（= 优化步 × 梯度累积）；拿不到就退回日志自己的数字
-    if st == "出图":
+    if st == "切图":
+        n, tot = crop_progress()
+        filled = max(1, min(W, int(W * n / tot)))
+        b = [f"{BOLD}{CYA}" + "━" * filled + f"{R}{DIM}" + "─" * max(1, W - filled) + R,
+             f"{CYA}无损切图{R} {WH}{n}/{tot}{R} {DIM}{n * 100 // tot}%{R}"]
+    elif st == "出图":
         n = _shot_count(); tot_s = 4
         pct = min(100, n * 100 // tot_s)
         filled = max(1, min(W, int(W * min(n, tot_s) / tot_s)))
