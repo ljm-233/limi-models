@@ -11,7 +11,7 @@ cd /home/link/sd-scripts
 $PY train_network.py \
   --pretrained_model_name_or_path "$BASE" \
   --train_data_dir "$DATASET" \
-  --output_dir "$OUT" --output_name seo_v5.2 \
+  --output_dir "$OUT" --output_name aowo_sd15_char_v5_2 \
   --network_module networks.lora --network_dim 96 --network_alpha 48 \
   --resolution 896 --enable_bucket --min_bucket_reso 768 --max_bucket_reso 1216 \
   --train_batch_size 1 --max_train_steps 3500 \

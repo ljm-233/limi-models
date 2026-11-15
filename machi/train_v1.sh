@@ -11,7 +11,7 @@ cd /home/link/sd-scripts
 $PY train_network.py \
   --pretrained_model_name_or_path "$BASE" \
   --train_data_dir "$DATASET" \
-  --output_dir "$OUT" --output_name machi_v1 \
+  --output_dir "$OUT" --output_name machi_sd15_legacy_v1 \
   --network_module networks.lora --network_dim 64 --network_alpha 32 \
   --resolution 832 --enable_bucket --min_bucket_reso 704 --max_bucket_reso 1152 \
   --train_batch_size 1 --max_train_steps 6000 \
