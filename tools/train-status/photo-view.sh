@@ -4,7 +4,12 @@
 IMG="${1:?用法: photo-view.sh <图片路径>}"
 LIST=/tmp/ts_imgs.txt
 FARM=/tmp/ts_all
-[ -f "$LIST" ] || { echo "缺清单 $LIST" >&2; exit 1; }
+# 清单可能被 /tmp 清掉：缺了就按和面板同样的规则现生成
+if [ ! -f "$LIST" ]; then
+  /home/link/ComfyUI/.venv/bin/python -c \
+    "import csv,os;rows=[r['file'] for r in csv.DictReader(open('/home/link/.dsh/miyu/train/report_v3.csv')) if os.path.exists(r['file'])];
+k=lambda f:(next((x for x in f.split('/') if x.isdigit() and len(x)>=8), ''), os.path.basename(f));print('\n'.join(sorted(rows,key=k)))" > "$LIST"
+fi
 mapfile -t FILES < "$LIST"
 IDX=0
 for i in "${!FILES[@]}"; do [ "${FILES[$i]}" = "$IMG" ] && { IDX=$i; break; }; done

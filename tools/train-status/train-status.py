@@ -1016,7 +1016,14 @@ def image_list():
             return _sorted(_drop([r["file"] for r in csv.DictReader(open(f"{TRAIN}/report_v3.csv"))
                                   if os.path.exists(r["file"])]))
         return _sorted(_drop(glob.glob(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")))
-    return cache("imgs", 60, _load)
+    lst = cache("imgs", 60, _load)
+    try:
+        if lst and not os.path.exists("/tmp/ts_imgs.txt"):
+            with open("/tmp/ts_imgs.txt", "w", encoding="utf-8") as f:
+                f.write("\n".join(lst) + "\n")
+    except Exception:
+        pass
+    return lst
 
 
 def save_pos(i):
@@ -1514,6 +1521,7 @@ def main():
     mouse = os.environ.get("TRAIN_STATUS_MOUSE", "1") != "0"
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
+    sys.stdout.write("\033_Ga=d,d=i,i=7\033\\")   # 清掉上一版留下的底图，别让它盖着窗口
     sys.stdout.write("\033[?1049h\033[?25l" + ("\033[?1000h\033[?1006h" if mouse else ""))
     last_reload = 0.0
     nxt = time.time()
@@ -1581,7 +1589,7 @@ def main():
                             pass
                         state["drawn"] = key
                 else:
-                    bg = bg_seq(state, W, H)
+                    bg = bg_seq(state, W, H) if os.environ.get("TRAIN_STATUS_BGIMG", "0") != "0" else ""
                     if bg and state.get("bg_key") != state.get("bg_key_done"):
                         sys.stdout.write(bg)
                         state["bg_key_done"] = state.get("bg_key")
