@@ -249,7 +249,47 @@ def _usable(p):
     return not any(k in name for k in SKIP_LOGS)
 
 
+def auto_log():
+    """谁在跑就跟谁：切图/训练/出图各认自己的日志"""
+    if alive("build_base_png"):
+        return "/tmp/rebuild_png.log"
+    if alive("train_network"):
+        best, bt = None, 0
+        for f in glob.glob("/tmp/*.log"):
+            if not _usable(f):
+                continue
+            try:
+                if time.time() - os.path.getmtime(f) > 600:
+                    continue
+                tail = open(f, "rb").read()[-65536:].decode("utf-8", "ignore")
+            except Exception:
+                continue
+            if "steps:" in tail and os.path.getmtime(f) > bt:
+                best, bt = f, os.path.getmtime(f)
+        if best:
+            return best
+    if alive("eval_auto") or alive("gen_detail") or alive("gen_face"):
+        for f in ("/tmp/eval_v3.log", "/tmp/eval_v4.log"):
+            if os.path.exists(f):
+                return f
+        best, bt = None, 0
+        for f in glob.glob("/tmp/*.log"):
+            if not _usable(f):
+                continue
+            try:
+                if os.path.getmtime(f) > bt:
+                    best, bt = f, os.path.getmtime(f)
+            except Exception:
+                pass
+        if best:
+            return best
+    return None
+
+
 def last_log():
+    a = auto_log()
+    if a:
+        return a
     t = tracked_log()
     if t:
         return t
@@ -422,7 +462,7 @@ def stage():
         return "出图"
     if alive("build_base_png"):
         return "切图"
-    if alive("eval_faces"):
+    if alive("eval_auto") or alive("eval_faces"):
         return "评分"
     if idle_now():
         return "空闲"
