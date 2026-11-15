@@ -447,12 +447,17 @@ def idle_now():
 
 
 def crop_progress():
-    """无损切图进度：已出 PNG / 预计总数（1409 张原图 × 4 类）"""
+    """无损切图进度：已出 PNG / 预计总数（当前清单源图数 × 4 类）"""
     try:
         n = len(glob.glob(f"{TRAIN}/dataset_v3_png/10_machi/*.png"))
     except Exception:
         n = 0
-    return n, 5636
+    rep = f"{TRAIN}/report_v5.csv" if os.path.exists(f"{TRAIN}/report_v5.csv") else f"{TRAIN}/report_v3.csv"
+    try:
+        src = max(1, sum(1 for _ in open(rep)) - 1)
+    except Exception:
+        src = 1409
+    return n, src * 4
 
 
 def stage():
@@ -862,11 +867,16 @@ def _train_sub(ep, tot):
 
 def page_flow(step, total, n_img, st, rate):
     times = _stage_times()
-    src = cache("src", 60, lambda: max(0, sum(1 for _ in open(f"{TRAIN}/report_v3.csv")) - 1)
-                if os.path.exists(f"{TRAIN}/report_v3.csv") else 0)
+    def _src_count():
+        rep = f"{TRAIN}/report_v5.csv" if os.path.exists(f"{TRAIN}/report_v5.csv") else f"{TRAIN}/report_v3.csv"
+        try:
+            return max(0, sum(1 for _ in open(rep)) - 1)
+        except Exception:
+            return 0
+    src = cache("src", 5, _src_count)
     cnt = lambda pat, ttl=60: cache("n:" + pat, ttl, lambda: len(glob.glob(pat)))
     cut = cnt(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")
-    tag = cnt(f"{TRAIN}/captions_wd14/*.txt")
+    tag = len(glob.glob(f"{TRAIN}/dataset_v3_png/10_machi/*.txt")) or cnt(f"{TRAIN}/captions_wd14/*.txt")
     ep = epoch_display(step, total, n_img)
     tot = total_epochs()
 
