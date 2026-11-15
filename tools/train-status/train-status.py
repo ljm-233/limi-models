@@ -495,22 +495,6 @@ def disk(path="/home/link"):
 def page_env(state):
     used, total, swap = mem()
     pct = used / total * 100
-    if _NARROW[0]:
-        out = []
-        c, t = cpu_pct(), cpu_temp()
-        out.append(f"{CYA}CPU{R}{heat(c, 60, 85)}{c:>3}%{R}"
-                   + (f" {heat(t, 70, 85)}{t:.0f}℃{R}" if t else ""))
-        g = gpu()
-        if g:
-            u, mu, tot_g, gt, pw, lim = g
-            out.append(f"{VIO}GPU{R}{heat(u, 80, 97)}{u:>3}%{R} {BLU}{mu:.1f}G{R}"
-                       f" {heat(gt, 72, 82)}{gt}℃{R}")
-        out.append(f"{YEL}内存{R}{heat(pct, 70, 88)}{used:.1f}G{R}")
-        age = log_age()
-        if age is not None:
-            col = GRN if age < 20 else (YEL if age < 90 else HOT)
-            out.append(f"{VIO}日志{R}{col}{age}s{R}")
-        return out
     out = [line_cpu(), line_gpu(),
            f"{YEL}内存{R} {heat(pct, 70, 88)}{used:.1f}{DIM}/{total:.1f}G{R} "
            f"{DIM}交换{R}{heat(swap, 2, 6)}{swap:.1f}G{R}"]
@@ -578,7 +562,7 @@ def _train_sub(ep, tot):
     if not ep:
         return ""
     s = f"第{ep}{('/' + str(tot)) if tot else ''}轮"
-    if durs and not _NARROW[0]:
+    if durs:
         s += f" · 上轮{_dur(durs[-1])}"
         if len(durs) > 1:
             s += f" · 均{_dur(sum(durs) // len(durs))}"
@@ -618,7 +602,7 @@ def page_flow(step, total, n_img, st, rate):
         else:
             mark, ncol = DIM + "·" + R, DIM
         body = f"{mark} {ncol}{name}{R}"
-        if sub and not _NARROW[0]:
+        if sub:
             body += f" {BLU}{sub}{R}"
         dcol = GRN if dur not in ("—", "", None) else DIM
         width = 26 if _NARROW[0] else 34
@@ -686,14 +670,15 @@ def page_quality(W):
             sch = re.search(r"--lr_scheduler (\S+)", sh)
             out.append(f"{VIO}学习率{R} {WH}{lr.group(1)}{R} {DIM}{sch.group(1) if sch else ''}{R}")
         if res:
-            if _NARROW[0]:
-                out.append(f"{CYA}本版{R}{BLU}{res.group(1)}px{R} "
-                           f"{DIM}目标{R}{WH}{ms.group(1) if ms else '-'}{R}")
-            else:
-                out.append(f"{CYA}本版{R}{BLU}{os.path.basename(script_for_run())}{R} "
-                           f"{DIM}{res.group(1)}px dim{R}{WH}{dim.group(1) if dim else '-'}{R} "
-                           f"{DIM}b{R}{WH}{bs.group(1) if bs else '-'}{R} "
-                           f"{DIM}目标{R}{WH}{ms.group(1) if ms else '-'}{R}")
+            full = (f"{CYA}本版{R} {BLU}{os.path.basename(script_for_run())}{R} "
+                    f"{DIM}{res.group(1)}px dim{R}{WH}{dim.group(1) if dim else '-'}{R} "
+                    f"{DIM}b{R}{WH}{bs.group(1) if bs else '-'}{R} "
+                    f"{DIM}目标{R}{WH}{ms.group(1) if ms else '-'}{R}")
+            if wlen(full) > W - 1:
+                full = (f"{CYA}本版{R} {DIM}{res.group(1)}px dim{R}{WH}{dim.group(1) if dim else '-'}{R} "
+                        f"{DIM}b{R}{WH}{bs.group(1) if bs else '-'}{R} "
+                        f"{DIM}目标{R}{WH}{ms.group(1) if ms else '-'}{R}")
+            out.append(full)
 
     name = current_run()
     cks = [f for f in glob.glob(f"{TRAIN}/out_*/*-step*.safetensors")
@@ -1047,25 +1032,23 @@ def cycle_size(step):
 
 
 # ── 排版 ───────────────────────────────────────────────
-def header(st, step, total, n_img, log_step=None):
-    if _NARROW[0]:
-        ep = epoch_display(step, total, n_img)
-        color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
-        s = f"{GRN}●{R}{WH}{time.strftime('%H:%M')}{R} {color}{st}{R}"
-        if ep:
-            tot = total_epochs()
-            s += f" {WH}{ep}{('/' + str(tot)) if tot else ''}轮{R}"
-        return s
-
+def header(st, step, total, n_img, log_step=None, W=80):
     name = read(f"{TRAIN}/.project_name", "马吉 v3").strip() or "马吉 v3"
-    ls = log_step if log_step is not None else step
     ep = epoch_display(step, total, n_img)
     tot = total_epochs()
     color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
-    tot = total_epochs()
-    tail = f" {color}{st}{R}" + (f" {WH}第{ep}{('/' + str(tot)) if tot else ''}轮{R}" if ep else "")
-    tail += f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
-    return f"{GRN}●{R} {WH}{name}{R} {DIM}{time.strftime('%H:%M:%S')}{R}{tail}"
+    parts = [f"{GRN}●{R}{WH}{name}{R}",
+             f"{DIM}{time.strftime('%H:%M:%S')}{R}",
+             f"{color}{st}{R}"]
+    if ep:
+        parts.append(f"{WH}第{ep}{('/' + str(tot)) if tot else ''}轮{R}")
+    line = " ".join(parts)
+    view = f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
+    if wlen(line + view) <= W:
+        return line + view
+    if wlen(line) <= W:
+        return line
+    return " ".join(parts[::2])      # 极端窄：只留名字和阶段
 
 
 def bottom(step, total, rate, W, cum=0):
