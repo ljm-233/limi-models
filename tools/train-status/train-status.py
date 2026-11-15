@@ -378,9 +378,9 @@ def epoch_durations():
         m = re.search(r"(\d+)/\1\s*\[\s*(\d+):(\d+)<", line)
         if m:
             v = int(m.group(2)) * 60 + int(m.group(3))
-            if v > 0:
+            if v > 0 and (not out or v != out[-1]):   # 同一条进度行会重复刷，去重
                 out.append(v)
-    return out[-8:]
+    return out[-12:]
 
 
 def max_steps():
@@ -556,6 +556,18 @@ def current_run():
     return ""
 
 
+def _train_sub(ep, tot):
+    durs = epoch_durations()
+    if not ep:
+        return ""
+    s = f"第{ep}{('/' + str(tot)) if tot else ''}轮"
+    if durs:
+        s += f" · 上轮{_dur(durs[-1])}"
+        if len(durs) > 1:
+            s += f" · 均{_dur(sum(durs) // len(durs))}"
+    return s
+
+
 def page_flow(step, total, n_img, st, rate):
     times = _stage_times()
     src = cache("src", 60, lambda: max(0, sum(1 for _ in open(f"{TRAIN}/report_v3.csv")) - 1)
@@ -575,8 +587,7 @@ def page_flow(step, total, n_img, st, rate):
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "—")),
         ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
         ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
-        ("训练", (f"第{ep}轮" + (f" · 上轮{_dur(epoch_durations()[-1])}" if epoch_durations() else "")) if ep else "",
-         train_dur),
+        ("训练", _train_sub(ep, tot), train_dur),
         ("出图", "4 张样图", times.get("出图", "—")),
         ("评分", "相似度+纹理", times.get("评分", "—")),
     ]
@@ -641,7 +652,7 @@ def page_quality(W):
         k = max(1, len(vals) // 10)
         head, tail = sum(vals[:k]) / k, sum(vals[-k:]) / k
         trend = f"{GRN}↓{R}" if tail < head - 1e-4 else (f"{HOT}↑{R}" if tail > head + 1e-4 else f"{DIM}→{R}")
-        out.append(f"{DIM}当前{R}{WH}{vals[-1]:.4f}{R} {trend} "
+        out.append(f"{DIM}当前{R} {WH}{vals[-1]:.4f}{R} {trend} "
                    f"{DIM}最低{R}{GRN}{lo:.4f}{R} {DIM}最高{R}{BLU}{hi:.4f}{R}")
     else:
         out.append(f"{CYA}loss{R} {DIM}本轮日志没输出 avr_loss{R}")
@@ -668,10 +679,17 @@ def page_quality(W):
     if cks:
         f = max(cks, key=os.path.getmtime)
         step_n = re.search(r"-step(\d+)", os.path.basename(f))
-        out.append(f"{ORG}存档{R}{BLU}{step_n.group(1) if step_n else '?'}{R}"
-                   f"{DIM}步{R} {DIM}{os.path.getsize(f) / 1048576:.0f}MB{R}")
+        n = int(step_n.group(1)) if step_n else 0
+        out.append(f"{ORG}存档{R}{BLU}{n}{R}{DIM}步{R} {DIM}{os.path.getsize(f) / 1048576:.0f}MB{R}")
     else:
         out.append(f"{ORG}存档{R} {DIM}还没有{R}")
+
+    durs = epoch_durations()
+    tot_ep = total_epochs()
+    if durs:
+        detail = " ".join(f"{i + 1}:{_dur(d)}" for i, d in enumerate(durs))
+        out.append(f"{CYA}各轮{R} {BLU}{detail}{R}"
+                   + (f" {DIM}共{R}{WH}{tot_ep}{R}{DIM}轮{R}" if tot_ep else ""))
 
     rep = last_report()
     if rep:
