@@ -1082,12 +1082,13 @@ def kitty_img(path, cols, rows, row=1, px=None, imgid=1):
         except Exception:
             scale = 1.0
         scale = min(1.0, max(0.25, scale))
+        BASE_W, BASE_H = 1744, 1441          # 面板 1163x961 逻辑 × 1.5 缩放
         if px:
             tw = max(16, int(px[0] * scale)); th = max(16, int(px[1] * scale))
         else:
             tw, th = max(16, cols * CELL_W), max(16, rows * CELL_H)
 
-        tp = thumb(path, cols, rows, (tw, th))
+        tp = thumb(path, cols, rows, (BASE_W, BASE_H))
         png = open(tp, "rb").read() if os.path.exists(tp) else None
         if png is None:
             src = src_thumb(path)
@@ -1101,7 +1102,7 @@ def kitty_img(path, cols, rows, row=1, px=None, imgid=1):
                 im.save(buf, format="PNG")
                 open(src + ".tmp", "wb").write(buf.getvalue())
                 os.replace(src + ".tmp", src)
-            im = Image.open(src).convert("RGB").resize((tw, th), Image.LANCZOS)
+            im = Image.open(src).convert("RGB").resize((BASE_W, BASE_H), Image.LANCZOS)
             buf = io.BytesIO()
             im.save(buf, format="PNG")
             png = buf.getvalue()
