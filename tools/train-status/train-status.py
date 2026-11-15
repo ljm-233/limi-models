@@ -664,6 +664,21 @@ def current_run():
     return ""
 
 
+def _cache_sub():
+    cd, ct = cache_progress()
+    return f"{cd}/{ct} 张" if cd and ct else ""
+
+
+def _cache_dur():
+    st_ = stage()
+    cd, ct = cache_progress()
+    if st_ == "训练" and cd and ct and not progress()[0]:
+        return "进行中"
+    if cd and ct and progress()[0]:
+        return "已完成"
+    return "—"
+
+
 def _shot_count():
     """当前在役权重这一版，出了几张样图"""
     lm = in_use_lora()
@@ -709,7 +724,9 @@ def page_flow(step, total, n_img, st, rate):
 
     lw = latest_weight()
     lw_name = os.path.basename(lw[0]).rsplit(".", 1)[0] if lw else ""
-    if st == "训练" and step and rate:
+    if st == "训练" and not (step and rate):
+        train_dur = "等缓存"          # 还在 cache_latents 阶段
+    elif st == "训练" and step and rate:
         train_dur = _dur(step / rate)
     elif st in ("空闲", "待机", "出图", "评分", "完成"):
         train_dur = f"已结束 · {lw_name}" if lw else "—"
@@ -720,6 +737,7 @@ def page_flow(step, total, n_img, st, rate):
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "—")),
         ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
         ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
+        ("缓存", cache("cacherow", 1.0, lambda: _cache_sub()), cache("cachedur", 1.0, lambda: _cache_dur())),
         ("训练", "" if st in ("空闲", "待机", "完成") else _train_sub(ep, tot),
          train_dur if st != "完成" else (f"已结束 · {lw_name}" if lw_name else "已结束")),
         ("出图", cache("nsample2", 5, lambda: f"本次 {_shot_count()} 张"), times.get("出图", "—")),
@@ -1366,8 +1384,8 @@ def compact(W, state, H):
         if cd and ct:
             pct = cd * 100 // ct
             filled = max(1, min(W, int(W * cd / ct)))
-            b = [DIM + "━" * filled + "─" * max(1, W - filled) + R,
-                 f"{DIM}缓存 latent{R} {BLU}{cd}/{ct}{R} {DIM}{pct}%{R}"]
+            b = [CYA + "━" * filled + DIM + "─" * max(1, W - filled) + R,
+                 f"{CYA}缓存 latent{R} {WH}{cd}/{ct}{R} {DIM}{pct}%{R}"]
         else:
             b = [DIM + "━" * max(1, W // 2) + "─" * max(1, W - W // 2) + R, f"{DIM}等待数据{R}"]
     elif step and total:
