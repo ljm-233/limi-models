@@ -241,12 +241,22 @@ def tracked_log():
     return None
 
 
+SKIP_LOGS = ("comfy_eval", "popup", "dsh-purge")
+
+
+def _usable(p):
+    name = os.path.basename(p)
+    return not any(k in name for k in SKIP_LOGS)
+
+
 def last_log():
     t = tracked_log()
     if t:
         return t
     now, best = time.time(), None
     for f in glob.glob("/tmp/*.log") + glob.glob("/tmp/*.out"):
+        if not _usable(f):
+            continue
         try:
             if now - os.path.getmtime(f) > 3600:
                 continue
@@ -666,6 +676,8 @@ def current_run():
 
 
 def _cache_sub():
+    if stage() != "训练":
+        return ""
     cd, ct = cache_progress()
     return f"{cd}/{ct} 张" if cd and ct else ""
 
