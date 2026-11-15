@@ -894,16 +894,17 @@ def open_viewer(idx=0):
                    timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-THUMB_W, THUMB_H = 1280, 800          # 缩略图缓存固定这个尺寸，与窗口大小无关
+THUMB_W, THUMB_H = 1280, 800          # 原图缓存尺寸（按比例，供不拉伸时用）
+CELL_W, CELL_H = 16, 36               # 一个字符格大约多少像素（kitty 默认识别）
 
 
-def thumb(path):
-    """缓存键只跟文件本身有关；显示时由 kitty 按窗口格数缩放，换窗口大小不用重做"""
+def thumb(path, cols=0, rows=0, px=None):
+    """缓存键含格数：拉伸版按窗口尺寸单独存，换尺寸才重做"""
     try:
         st = os.stat(path)
-        key = f"thumb{THUMB_W}x{THUMB_H}|{path}|{st.st_mtime_ns}"
+        key = f"thumb|{path}|{st.st_mtime_ns}|{cols}x{rows}|{px}"
     except Exception:
-        key = f"thumb{THUMB_W}x{THUMB_H}|{path}"
+        key = f"thumb|{path}|{cols}x{rows}|{px}"
     return os.path.join(THUMB_DIR, hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
@@ -916,25 +917,24 @@ def _legacy_thumb(path, cols, rows):
     return os.path.join(THUMB_DIR, hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
-def kitty_img(path, cols, rows, row=1):
+def kitty_img(path, cols, rows, row=1, px=None):
+    """把图拉伸到 cols×rows 个字符格对应的像素框，铺满窗口（不改比例，会变形）"""
     if not path:
         return ""
     try:
         from PIL import Image
         import io, base64
-        tp = thumb(path)
-        if not os.path.exists(tp):                       # 老缓存（按窗口尺寸建的）能借就借
-            for legacy in (_legacy_thumb(path, 46, 14), _legacy_thumb(path, 60, 22)):
-                if os.path.exists(legacy):
-                    shutil.copyfile(legacy, tp)
-                    break
+        if px:
+            tw, th = max(16, int(px[0])), max(16, int(px[1]))
+        else:
+            tw, th = max(16, cols * CELL_W), max(16, rows * CELL_H)
+        tp = thumb(path, cols, rows, px)
         png = open(tp, "rb").read() if os.path.exists(tp) else None
         if png is None:
             os.makedirs(THUMB_DIR, exist_ok=True)
             im = Image.open(path)
-            im.draft("RGB", (THUMB_W * 2, THUMB_H * 2))
-            im = im.convert("RGB")
-            im.thumbnail((THUMB_W, THUMB_H), Image.LANCZOS)
+            im.draft("RGB", (tw * 2, th * 2))
+            im = im.convert("RGB").resize((tw, th), Image.LANCZOS)   # 硬拉伸
             buf = io.BytesIO()
             im.save(buf, format="PNG")
             png = buf.getvalue()
@@ -944,8 +944,8 @@ def kitty_img(path, cols, rows, row=1):
         parts = [data[i:i + 3800] for i in range(0, len(data), 3800)]
         out = [f"\033[{row};1H"]
         for i, ch in enumerate(parts):
-            head = f"a=T,f=100,c={cols},r={rows}," + ("C=1,q=2," if True else "")
-            out.append(f"\033_G{head}m={0 if i == len(parts) - 1 else 1};{ch}\033\\")
+            head = f"a=T,f=100,c={cols},r={rows},C=1,q=2,"
+            out.append(f"\033_G{head}m={0 if i == len(parts) - 1 else 1};{ch}\\")
         return "".join(out)
     except Exception:
         return ""
@@ -1207,7 +1207,10 @@ def main():
                         path = preview_image(state["img_idx"])
                     key = f"{path}|{W}x{H}"
                     if state.get("drawn") != key:        # 同一张图不重画，否则整屏每轮闪一下
-                        seq = cache(f"full:{key}", 600, lambda: kitty_img(path, W, H))
+                        g = panel_geom()
+                        px = (g[2], g[3]) if g else None
+                        seq = cache(f"full:{key}:{px}", 600,
+                                    lambda: kitty_img(path, W, H, 1, px))
                         sys.stdout.write(DEL_IMG + "\033[H\033[J" + seq + "\033[?25l")
                         sys.stdout.flush()
                         state["drawn"] = key
