@@ -645,6 +645,19 @@ def current_run():
     return ""
 
 
+def _shot_count():
+    """当前在役权重这一版，出了几张样图"""
+    lm = in_use_lora()
+    if not lm:
+        return 0
+    stem = os.path.basename(lm[0]).rsplit(".", 1)[0]
+    try:
+        return len([f for f in os.listdir("/home/link/ComfyUI/output")
+                    if f.startswith(f"eval_{stem}_") and f.endswith(".png")])
+    except Exception:
+        return 0
+
+
 def _sample_count():
     try:
         return len([f for f in os.listdir("/home/link/ComfyUI/output")
@@ -675,11 +688,12 @@ def page_flow(step, total, n_img, st, rate):
     ep = epoch_display(step, total, n_img)
     tot = total_epochs()
 
+    lw = latest_weight()
+    lw_name = os.path.basename(lw[0]).rsplit(".", 1)[0] if lw else ""
     if st == "训练" and step and rate:
         train_dur = _dur(step / rate)
-    elif st in ("空闲", "待机"):
-        lw = latest_weight()
-        train_dur = f"已结束 · {os.path.basename(lw[0]).rsplit('.', 1)[0]}" if lw else "—"
+    elif st in ("空闲", "待机", "出图", "评分", "完成"):
+        train_dur = f"已结束 · {lw_name}" if lw else "—"
     else:
         train_dur = times.get("训练", "—")
 
@@ -687,8 +701,9 @@ def page_flow(step, total, n_img, st, rate):
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "—")),
         ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
         ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
-        ("训练", "" if st in ("空闲", "待机") else _train_sub(ep, tot), train_dur),
-        ("出图", f"{cache('nsample', 60, _sample_count)} 张", times.get("出图", "—")),
+        ("训练", "" if st in ("空闲", "待机") else _train_sub(ep, tot),
+         train_dur if st != "完成" else (f"已结束 · {lw_name}" if lw_name else "已结束")),
+        ("出图", cache("nsample2", 5, lambda: f"本次 {_shot_count()} 张"), times.get("出图", "—")),
         ("评分", "相似度+纹理", times.get("评分", "—")),
     ]
     names = [r[0] for r in rows]
