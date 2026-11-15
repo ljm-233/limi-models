@@ -25,4 +25,5 @@ exec env TRAIN_STATUS_RESIZE=0 TRAIN_STATUS_KEYS=noq kitty --instance-group trai
     -o remember_window_size=no \
     -o initial_window_width=${C}c -o initial_window_height=${L}c \
     -o window_padding_width=0 \
+    -o background_opacity=1.0 \
     /home/link/.dsh/miyu/scripts/train-status.sh loop
