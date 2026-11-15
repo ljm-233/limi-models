@@ -929,18 +929,26 @@ def image_list():
     def _drop(lst):
         return [f for f in lst if f not in bad] or lst
 
+    def _sorted(lst):
+        """按「工坊套 + 文件名」排，同一套的放一起，顺序稳定不随机"""
+        def key(f):
+            parts = f.split("/")
+            setid = next((x for x in parts if x.isdigit() and len(x) >= 8), "")
+            return (setid, os.path.basename(f))
+        return sorted(lst, key=key)
+
     def _load():
         try:
             with open("/tmp/ts_imgs.txt", encoding="utf-8") as f:
                 lst = [l.strip() for l in f if l.strip()]
             if lst:
-                return _drop(lst)
+                return _sorted(_drop(lst))
         except Exception:
             pass
         if os.path.exists(f"{TRAIN}/report_v3.csv"):
-            return _drop([r["file"] for r in csv.DictReader(open(f"{TRAIN}/report_v3.csv"))
-                          if os.path.exists(r["file"])])
-        return _drop(sorted(glob.glob(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")))
+            return _sorted(_drop([r["file"] for r in csv.DictReader(open(f"{TRAIN}/report_v3.csv"))
+                                  if os.path.exists(r["file"])]))
+        return _sorted(_drop(glob.glob(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")))
     return cache("imgs", 60, _load)
 
 
