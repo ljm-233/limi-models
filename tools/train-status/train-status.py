@@ -213,7 +213,25 @@ def top_procs(n=3):
 
 
 # ── 日志 ───────────────────────────────────────────────
+TRACK_FILE = "/tmp/ts_track.json"
+
+
+def tracked_log():
+    """启动训练/出图时写进来的日志路径——面板只认它，不猜最新文件"""
+    try:
+        d = json.load(open(TRACK_FILE))
+        p = d.get("log")
+        if p and os.path.exists(p) and time.time() - os.path.getmtime(p) < 6 * 3600:
+            return p
+    except Exception:
+        pass
+    return None
+
+
 def last_log():
+    t = tracked_log()
+    if t:
+        return t
     now, best = time.time(), None
     for f in glob.glob("/tmp/*.log") + glob.glob("/tmp/*.out"):
         try:
@@ -317,39 +335,11 @@ def epochs_of(step, per):
     return (step // per + 1) if (step and per) else 0
 
 
-EPOCH_STATE = f"{TRAIN}/.epoch_state.json"
-_CUM = 0
-
-
-def epoch_display(step, total, n_img):
-    """轮次 = 累计批次 // 每轮批次 + 1。
-    累计批次靠累加进度条增量得到（每秒刷新，掉头也能接上），
-    初次启动时用日志里"跑满一轮"的痕迹做种子。"""
-    if not (step and n_img):
-        return 0
+def full_log_text(path):
     try:
-        st = json.load(open(EPOCH_STATE))
+        return open(path, "rb").read().decode("utf-8", "ignore").replace("\r", "\n")
     except Exception:
-        st = {}
-    if "cum" not in st:
-        raw = log_text(last_log())
-        base = n_img if f"{n_img}/{n_img}" in raw else 0
-        st = {"cum": base + step, "last": step}
-    else:
-        last = int(st.get("last", 0))
-        cum = int(st.get("cum", 0))
-        if step > last:
-            cum += step - last
-        elif step < last:                   # 换轮：从 0 重新数
-            cum += step
-        st = {"cum": cum, "last": step}
-    try:
-        json.dump(st, open(EPOCH_STATE, "w"))
-    except Exception:
-        pass
-    global _CUM
-    _CUM = int(st.get("cum", 0))
-    return _CUM // n_img + 1
+        return ""
 
 
 def grad_accum():
@@ -358,30 +348,56 @@ def grad_accum():
 
 
 def total_epochs():
-    """总轮数 = 总批次 / 每轮批次，向上取整"""
     per, ms = imgs_per_epoch(), max_steps()
     if not (per and ms):
         return 0
     return -(-(ms * grad_accum()) // per)
 
 
-def full_log_text(path):
-    try:
-        return open(path, "rb").read().decode("utf-8", "ignore").replace("\r", "\n")
-    except Exception:
-        return ""
+def _epoch_scan():
+    """从日志里数轮次：step 大幅回退就是新一轮。返回 [(本轮最大 step, 本轮最后一条的秒数)]"""
+    eps, cur_max, cur_sec, prev = [], 0, 0, None
+    for line in full_log_text(last_log() or "").split("\n"):
+        m = re.search(r"(\d+)/(\d+)\s*\[\s*(\d+):(\d+)<", line)
+        if not m:
+            continue
+        step, total = int(m.group(1)), int(m.group(2))
+        sec = int(m.group(3)) * 60 + int(m.group(4))
+        if prev is not None and step + 50 < prev and prev >= 0.9 * max(total, 1):
+            eps.append((cur_max, cur_sec))   # 跑满一轮再回退 = 新一轮；中途重启不算
+            cur_max, cur_sec = 0, 0
+        prev = step
+        cur_max = max(cur_max, step)
+        cur_sec = max(cur_sec, sec)
+    eps.append((cur_max, cur_sec))
+    return eps
+
+
+def epoch_display(step, total, n_img):
+    if not step:
+        return 0
+    tot = total_epochs()
+    seen = len(_epoch_scan())
+    return min(seen, tot) if tot else seen
 
 
 def epoch_durations():
-    """每轮耗时：日志里 '2959/2959 [18:45<' 这种跑满一轮的行能直接量出来"""
+    per = imgs_per_epoch() or 0
     out = []
-    for line in full_log_text(last_log() or "").split("\n"):
-        m = re.search(r"(\d+)/\1\s*\[\s*(\d+):(\d+)<", line)
-        if m:
-            v = int(m.group(2)) * 60 + int(m.group(3))
-            if v > 0 and (not out or v != out[-1]):   # 同一条进度行会重复刷，去重
-                out.append(v)
-    return out[-12:]
+    for mx, sec in _epoch_scan():
+        if sec > 0 and (not per or mx >= 0.9 * per):
+            out.append(sec)
+    return out
+
+
+def batches_done(step=None):
+    """已完成批次：有一轮容量就按总容量封顶，否则退回日志里看到的量"""
+    per = imgs_per_epoch() or 0
+    cap = (max_steps() or 0) * grad_accum()
+    seen = sum(mx for mx, _ in _epoch_scan())
+    if step:
+        seen = max(seen, step)
+    return min(seen, cap) if cap else seen
 
 
 def max_steps():
@@ -588,7 +604,7 @@ def page_flow(step, total, n_img, st, rate):
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "—")),
         ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
         ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
-        ("训练", _train_sub(ep, tot), train_dur),
+        ("训练", _train_sub(ep, tot), train_dur if st != "完成" else "已结束"),
         ("出图", "4 张样图", times.get("出图", "—")),
         ("评分", "相似度+纹理", times.get("评分", "—")),
     ]
@@ -1165,7 +1181,7 @@ def compact(W, state, H):
         r += gap
     # 底部给整体进度：累计批次 vs 总批次（= 优化步 × 梯度累积）；拿不到就退回日志自己的数字
     if step and total:
-        b = bottom(min(step, total), total, rate, W, _CUM)
+        b = bottom(min(step, total), total, rate, W, batches_done(step))
     else:
         b = bottom(step, total, rate, W)
     rows += [(max(3, H - 2), b[0]), (max(3, H - 1), b[1]), (max(3, H), footer(state, W))]
