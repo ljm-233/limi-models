@@ -648,6 +648,90 @@ def _norm_dur(v):
     return v
 
 
+STAGE_FILE = "/tmp/ts_stages.json"
+
+
+def tick_stages():
+    """每次刷新调一次：记录每个阶段从什么时候开始、什么时候结束"""
+    st = stage()
+    try:
+        d = json.load(open(STAGE_FILE))
+    except Exception:
+        d = {}
+    now = time.time()
+    cur = d.get("_cur")
+    if cur != st:
+        if cur and cur in d and not d[cur].get("end"):
+            d[cur]["end"] = now
+        d.setdefault(st, {"start": now, "end": None})
+        if not d[st].get("start"):
+            d[st]["start"] = now
+        d[st]["end"] = None
+        d["_cur"] = st
+        try:
+            json.dump(d, open(STAGE_FILE, "w"))
+        except Exception:
+            pass
+    return d
+
+
+def log_durations():
+    """从日志回填这一段的时间：训练 = 步数/速率；缓存 = 总跨度 - 训练"""
+    p = last_log()
+    if not p:
+        return {}
+    txt = log_text(p)
+    stamps = []
+    for line in txt.splitlines():
+        m = re.match(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)", line)
+        if not m:
+            continue
+        try:
+            stamps.append(time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")))
+        except Exception:
+            pass
+    step, total, rate, _ = parse(txt)
+    out = {}
+    if step and rate:
+        out["训练"] = step / rate
+    if stamps:
+        span = max(stamps) - min(stamps)
+        if out.get("训练") and 0 < span - out["训练"] < 6 * 3600:
+            out["缓存"] = span - out["训练"]
+    return out
+
+
+def shot_span():
+    """出图耗时：按这一版样图的生成时间跨度算"""
+    lm = latest_weight()
+    if not lm:
+        return None
+    stem = os.path.basename(lm[0]).rsplit(".", 1)[0]
+    try:
+        ts = [os.path.getmtime(f) for f in glob.glob(f"/home/link/ComfyUI/output/eval_{stem}_*.png")]
+    except Exception:
+        return None
+    if len(ts) < 2:
+        return None
+    span = max(ts) - min(ts)
+    return span if 0 < span < 2 * 3600 else None
+
+
+def stage_time(name):
+    """某一步花了多久：跑着的是到现在为止，跑完的是最终值"""
+    d = tick_stages()
+    v = d.get(name) or {}
+    st, en = v.get("start"), v.get("end")
+    if not st:
+        if name == "出图":
+            sp = shot_span()
+            if sp:
+                return _dur(sp)
+        back = log_durations().get(name)
+        return _dur(back) if back else ""
+    return _dur((en or time.time()) - st)
+
+
 def _stage_times():
     try:
         d = json.load(open(f"{TRAIN}/stage_times.json"))
@@ -737,25 +821,25 @@ def page_flow(step, total, n_img, st, rate):
 
     lw = latest_weight()
     lw_name = os.path.basename(lw[0]).rsplit(".", 1)[0] if lw else ""
+    train_dur = stage_time("训练") or times.get("训练", "—")
     if st == "训练" and not (step and rate):
-        train_dur = "等缓存"          # 还在 cache_latents 阶段
+        train_dur = "等缓存"
     elif st == "训练" and step and rate:
         train_dur = _dur(step / rate)
-    elif st in ("空闲", "待机", "出图", "评分", "完成"):
-        train_dur = f"已结束 · {lw_name}" if lw else "—"
-    else:
-        train_dur = times.get("训练", "—")
+    train_sub = "" if st in ("空闲", "待机", "完成") else _train_sub(ep, tot)
+    if st in ("出图", "评分", "完成") and lw_name:
+        train_sub = f"已结束 · {lw_name}"
 
     rows = [
-        ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "—")),
-        ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
-        ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
-        ("缓存", cache("cacherow", 1.0, lambda: _cache_sub()), cache("cachedur", 1.0, lambda: _cache_dur())),
-        ("训练", "" if st in ("空闲", "待机", "完成") else _train_sub(ep, tot),
-         train_dur if st != "完成" else (f"已结束 · {lw_name}" if lw_name else "已结束")),
-        ("出图", ("待训练完成" if st in ("训练",) else cache("nsample2", 5, lambda: f"本次 {_shot_count()} 张")),
-         times.get("出图", "—")),
-        ("评分", ("待出图" if st in ("训练", "出图") else "相似度+纹理"), times.get("评分", "—")),
+        ("扫描", f"{src} 张原图" if src else "", stage_time("扫描") or times.get("扫描", "—")),
+        ("切图", f"{cut} 张裁片" if cut else "", stage_time("切图") or times.get("切图", "—")),
+        ("打标", f"{tag} 条描述" if tag else "", stage_time("打标") or times.get("打标", "—")),
+        ("缓存", _cache_sub(), stage_time("缓存") or "—"),
+        ("训练", train_sub, train_dur),
+        ("出图", ("待训练完成" if st in ("训练",) else f"本次 {_shot_count()} 张"),
+         stage_time("出图") or times.get("出图", "—")),
+        ("评分", ("待出图" if st in ("训练", "出图") else "相似度+纹理"),
+         stage_time("评分") or times.get("评分", "—")),
     ]
     names = [r[0] for r in rows]
     csub = cache("cacherow", 1.0, lambda: _cache_sub())
@@ -1435,7 +1519,17 @@ def compact(W, state, H):
         rows.append((r, line))
         r += gap
     # 底部给整体进度：累计批次 vs 总批次（= 优化步 × 梯度累积）；拿不到就退回日志自己的数字
-    if st in ("空闲", "待机", "完成"):
+    if st == "出图":
+        n = _shot_count(); tot_s = 4
+        pct = min(100, n * 100 // tot_s)
+        filled = max(1, min(W, int(W * min(n, tot_s) / tot_s)))
+        b = [f"{BOLD}{YEL}" + "━" * filled + f"{R}{DIM}" + "─" * max(1, W - filled) + R,
+             f"{YEL}出图{R} {WH}{n}/{tot_s}{R} {DIM}{pct}%{R}"]
+    elif st == "评分":
+        n = int(time.time() * 2) % max(2, W - 4)
+        b = [f"{DIM}" + "─" * n + f"{VIO}▌" + "─" * max(0, W - n - 2) + R,
+             f"{VIO}评分中{R} {DIM}算相似度与纹理{R}"]
+    elif st in ("空闲", "待机", "完成"):
         lw = latest_weight()
         nm = os.path.basename(lw[0]).rsplit(".", 1)[0] if lw else ""
         head_word = "完成" if st == "完成" else "空闲"
@@ -1443,7 +1537,7 @@ def compact(W, state, H):
                  f"{DIM}{head_word}{R} {DIM}· 上次{R} {BLU}{nm}{R}",
                  f"{DIM}{head_word}{R}"]
         tip = next((c for c in cands if wlen(c) <= W - 1), cands[-1])
-        b = [DIM + "─" * W + R, tip]
+        b = [GRN + "━" * W + R, tip] if st == "完成" else [DIM + "─" * W + R, tip]
     elif st == "训练" and not step:
         cd, ct = cache_progress()
         if cd and ct:
@@ -1452,9 +1546,7 @@ def compact(W, state, H):
             b = [f"{BOLD}{CYA}" + "━" * filled + f"{R}{DIM}" + "─" * max(1, W - filled) + R,
                  f"{CYA}缓存 latent{R} {WH}{cd}/{ct}{R} {DIM}{pct}%{R}"]
         else:
-            b = [DIM + "━" * max(1, W // 2) + "─" * max(1, W - W // 2) + R, f"{DIM}等待数据{R}"]
-    elif step and total:
-        b = bottom(min(step, total), total, rate, W, batches_done(step))
+            b = bottom(None, None, None, W)
     else:
         b = bottom(step, total, rate, W)
     rows += [(max(3, H - 2), b[0]), (max(3, H - 1), b[1]), (max(3, H), footer(state, W))]
