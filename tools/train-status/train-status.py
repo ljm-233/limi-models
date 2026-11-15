@@ -1116,6 +1116,44 @@ def src_thumb(path):
     return os.path.join(THUMB_DIR, hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
+def bg_seq(state, W, H):
+    """文字页的底图：最近看的那张图调暗铺满窗口，桌面不参与"""
+    try:
+        if not image_list():
+            return ""
+        g = cache("geom", 2, panel_geom)
+        sc = cache("scale", 30, output_scale)
+        px = (int(g[2] * sc), int(g[3] * sc)) if g else None
+        path = preview_image(state["img_idx"])
+        key = f"{path}|{px}"
+        state["bg_key"] = key
+        return cache("bg:" + key, 600, lambda: _dimmed_img(path, px))
+    except Exception:
+        return ""
+
+
+def _dimmed_img(path, px):
+    from PIL import Image
+    import io, base64
+    try:
+        tp = thumb(path, 0, 0, (1744, 1441))
+        im = Image.open(tp).convert("RGB")
+        if px:
+            im = im.resize((int(px[0]), int(px[1])), Image.LANCZOS)
+        im = Image.eval(im, lambda v: int(v * 0.32))
+        buf = io.BytesIO(); im.save(buf, "PNG", compress_level=1)
+        data = base64.b64encode(buf.getvalue()).decode()
+        out = []
+        chunks = [data[i:i + 3800] for i in range(0, len(data), 3800)]
+        for i, c in enumerate(chunks):
+            more = 0 if i == len(chunks) - 1 else 1
+            head = (f"\033_Ga=T,f=100,i=7,q=2,m={more}" if i == 0 else f"\033_Gm={more}")
+            out.append(f"{head};{c}\033\\")
+        return "".join(out) + "\033[H"
+    except Exception:
+        return ""
+
+
 def thumb(path, cols=0, rows=0, px=None):
     """缓存键含格数：拉伸版按窗口尺寸单独存，换尺寸才重做"""
     try:
@@ -1543,6 +1581,10 @@ def main():
                             pass
                         state["drawn"] = key
                 else:
+                    bg = bg_seq(state, W, H)
+                    if bg and state.get("bg_key") != state.get("bg_key_done"):
+                        sys.stdout.write(bg)
+                        state["bg_key_done"] = state.get("bg_key")
                     rows, _, _ = compact(W, state, H)
                     draw(rows, W)
                     state["drawn"] = None
