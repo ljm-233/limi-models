@@ -1069,12 +1069,17 @@ def kitty_img(path, cols, rows, row=1, px=None, imgid=1):
         import io, base64
         Image.MAX_IMAGE_PIXELS = None
         ImageFile.LOAD_TRUNCATED_IMAGES = True   # 截断的 JPEG 也照样解，imv 能看它就该能看          # 原图有上亿像素，别被"解压炸弹"拦下
+        try:
+            scale = float(os.environ.get("TRAIN_STATUS_IMG_SCALE", "0.5"))
+        except Exception:
+            scale = 0.5
+        scale = min(1.0, max(0.25, scale))
         if px:
-            tw, th = max(16, int(px[0])), max(16, int(px[1]))
+            tw = max(16, int(px[0] * scale)); th = max(16, int(px[1] * scale))
         else:
             tw, th = max(16, cols * CELL_W), max(16, rows * CELL_H)
 
-        tp = thumb(path, cols, rows, px)
+        tp = thumb(path, cols, rows, (tw, th))
         png = open(tp, "rb").read() if os.path.exists(tp) else None
         if png is None:
             src = src_thumb(path)
@@ -1103,8 +1108,7 @@ def kitty_img(path, cols, rows, row=1, px=None, imgid=1):
             more = 0 if i == n - 1 else 1
             if i == 0:      # 只有第一块带完整参数，后续块只带 m 和负载
                 # i=1：同一 id 反复传，kitty 原地替换而不是先删后画，切换不闪
-                head = (f"a=T,f=100,i={imgid},C=1,q=2,m={more}" if px else
-                        f"a=T,f=100,i={imgid},c={cols},r={rows},C=1,q=2,m={more}")
+                head = f"a=T,f=100,i={imgid},c={cols},r={rows},C=1,q=2,m={more}"
             else:
                 head = f"m={more}"
             out.append(f"\033_G{head};{ch}\033\\")
