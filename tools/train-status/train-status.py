@@ -794,20 +794,36 @@ def page_log(W, step, total, losses):
     return out
 
 
+BAD_FILE = f"{TRAIN}/bad_images.txt"
+
+
+def _bad_set():
+    try:
+        return {l.strip() for l in open(BAD_FILE, encoding="utf-8") if l.strip()}
+    except Exception:
+        return set()
+
+
 def image_list():
-    """必须和 photo-view.sh / imv 用同一份清单，否则索引错位"""
+    """必须和 photo-view.sh / imv 用同一份清单，否则索引错位；
+    坏图（解码失败，见 bad_images.txt）剔除掉，别让翻页停在白屏上"""
+    bad = cache("badset", 30, _bad_set)
+
+    def _drop(lst):
+        return [f for f in lst if f not in bad] or lst
+
     def _load():
         try:
             with open("/tmp/ts_imgs.txt", encoding="utf-8") as f:
                 lst = [l.strip() for l in f if l.strip()]
             if lst:
-                return lst
+                return _drop(lst)
         except Exception:
             pass
-        return sorted(
-            r["file"] for r in csv.DictReader(open(f"{TRAIN}/report_v3.csv"))
-            if os.path.exists(r["file"])) if os.path.exists(f"{TRAIN}/report_v3.csv") \
-            else sorted(glob.glob(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg"))
+        if os.path.exists(f"{TRAIN}/report_v3.csv"):
+            return _drop([r["file"] for r in csv.DictReader(open(f"{TRAIN}/report_v3.csv"))
+                          if os.path.exists(r["file"])])
+        return _drop(sorted(glob.glob(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")))
     return cache("imgs", 60, _load)
 
 
