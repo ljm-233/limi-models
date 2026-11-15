@@ -947,7 +947,12 @@ def kitty_img(path, cols, rows, row=1, px=None):
         for i, ch in enumerate(parts):
             more = 0 if i == n - 1 else 1
             if i == 0:      # 只有第一块带完整参数，后续块只带 m 和负载
-                head = f"a=T,f=100,c={cols},r={rows},C=1,q=2,m={more}"
+                # 有像素尺寸时不指定格数：kitty 按原生像素铺，正好等于窗口内区，
+                # 指定 c/r 反而会被取整成更小的格网区域，四周留边
+                if px:
+                    head = f"a=T,f=100,C=1,q=2,m={more}"
+                else:
+                    head = f"a=T,f=100,c={cols},r={rows},C=1,q=2,m={more}"
             else:
                 head = f"m={more}"
             out.append(f"\033_G{head};{ch}\033\\")
@@ -984,6 +989,16 @@ def panel_geom():
     if not pos:
         return None
     return int(pos[0]), int(pos[1]), int(size[0]), int(size[1])
+
+
+def output_scale():
+    for v in (niri_json(["outputs"]) or {}).values():
+        lg = v.get("logical") or {}
+        try:
+            return float(lg.get("scale") or 1.0)
+        except Exception:
+            pass
+    return 1.0
 
 
 def screen_size():
@@ -1222,7 +1237,8 @@ def main():
                     key = f"{path}|{W}x{H}"
                     if state.get("drawn") != key:        # 同一张图不重画，否则整屏每轮闪一下
                         g = panel_geom()
-                        px = (g[2], g[3]) if g else None
+                        sc = output_scale()
+                        px = (int(g[2] * sc), int(g[3] * sc)) if g else None
                         seq = cache(f"full:{key}:{px}", 600,
                                     lambda: kitty_img(path, W, H, 1, px))
                         sys.stdout.write(DEL_IMG + "\033[H\033[J" + seq + "\033[?25l")
