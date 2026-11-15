@@ -681,8 +681,8 @@ def _cache_dur():
 
 
 def _shot_count():
-    """当前在役权重这一版，出了几张样图"""
-    lm = in_use_lora()
+    """刚训出来的这一版权重，出了几张样图"""
+    lm = latest_weight() or in_use_lora()
     if not lm:
         return 0
     stem = os.path.basename(lm[0]).rsplit(".", 1)[0]
@@ -754,6 +754,8 @@ def page_flow(step, total, n_img, st, rate):
         now = names.index(st)
     elif st in ("空闲", "待机"):
         now = -1                      # 没有正在跑的步骤：谁都不打勾
+    elif st == "完成":
+        now = names.index("训练") + 1  # 训练确实走完了，出图/评分都还没跑
     else:
         now = len(rows)
     out = []
