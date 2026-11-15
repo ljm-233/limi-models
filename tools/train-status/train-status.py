@@ -927,7 +927,7 @@ def _legacy_thumb(path, cols, rows):
     return os.path.join(THUMB_DIR, hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
-def kitty_img(path, cols, rows, row=1, px=None):
+def kitty_img(path, cols, rows, row=1, px=None, imgid=1):
     """把图拉伸到窗口像素尺寸（px）铺满，或退回格数估算"""
     if not path:
         return ""
@@ -969,8 +969,8 @@ def kitty_img(path, cols, rows, row=1, px=None):
             more = 0 if i == n - 1 else 1
             if i == 0:      # 只有第一块带完整参数，后续块只带 m 和负载
                 # i=1：同一 id 反复传，kitty 原地替换而不是先删后画，切换不闪
-                head = f"a=T,f=100,i=1,C=1,q=2,m={more}" if px else \
-                       f"a=T,f=100,i=1,c={cols},r={rows},C=1,q=2,m={more}"
+                head = (f"a=T,f=100,i={imgid},C=1,q=2,m={more}" if px else
+                        f"a=T,f=100,i={imgid},c={cols},r={rows},C=1,q=2,m={more}")
             else:
                 head = f"m={more}"
             out.append(f"\033_G{head};{ch}\033\\")
@@ -1257,12 +1257,17 @@ def main():
                         g = cache("geom", 2, panel_geom)
                         sc = cache("scale", 30, output_scale)
                         px = (int(g[2] * sc), int(g[3] * sc)) if g else None
-                        seq = cache(f"full:{key}:{px}", 600,
-                                    lambda: kitty_img(path, W, H, 1, px))
                         fresh = state.get("drawn") is None      # 从文字页切进来才需要清屏
+                        old_id = state.get("img_id", 1)
+                        new_id = 2 if old_id == 1 else 1
+                        seq = cache(f"full:{key}:{px}:{new_id}", 600,
+                                    lambda: kitty_img(path, W, H, 1, px, new_id))
                         if seq:
                             prefix = (DEL_IMG + "\033[H\033[J") if fresh else ""
-                            sys.stdout.write(prefix + seq + "\033[?25l")
+                            # 先画新 id，再删旧 id：任何一帧都有图，不会闪白
+                            tail = "" if fresh else f"\033_Ga=d,d=i,i={old_id}\033\\"
+                            sys.stdout.write(prefix + seq + tail + "\033[?25l")
+                            state["img_id"] = new_id
                         else:                      # 图坏了别白屏，给一行说明
                             name = os.path.basename(path)[:max(8, W - 6)]
                             msg = [f"{HOT}这张读不出来{R}",
@@ -1279,8 +1284,10 @@ def main():
                             import threading
                             nxt_i = (state["img_idx"] + 1) % max(1, len(image_list()))
                             nf = image_list()[nxt_i]
-                            threading.Thread(target=kitty_img, args=(nf, W, H, 1, px),
-                                             daemon=True).start()
+                            for iid in (1, 2):
+                                threading.Thread(target=kitty_img,
+                                                 args=(nf, W, H, 1, px, iid),
+                                                 daemon=True).start()
                         except Exception:
                             pass
                         state["drawn"] = key
