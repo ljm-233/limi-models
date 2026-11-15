@@ -1060,19 +1060,6 @@ def _legacy_thumb(path, cols, rows):
     return os.path.join(THUMB_DIR, hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
-def kitty_place(imgid):
-    """把已经传过的图再摆出来（不重传像素）——同尺寸下切换是零负载"""
-    return f"\033_Ga=p,i={imgid},p=1,C=1,q=2\033\\"
-
-
-def kitty_drop_place(imgid):
-    return f"\033_Ga=d,d=p,i={imgid},p=1\033\\"
-
-
-def kitty_drop_img(imgid):
-    return f"\033_Ga=d,d=i,i={imgid}\033\\"
-
-
 def kitty_img(path, cols, rows, row=1, px=None, imgid=1):
     """把图拉伸到窗口像素尺寸（px）铺满，或退回格数估算"""
     if not path:
@@ -1121,8 +1108,7 @@ def kitty_img(path, cols, rows, row=1, px=None, imgid=1):
             more = 0 if i == n - 1 else 1
             if i == 0:      # 只有第一块带完整参数，后续块只带 m 和负载
                 # i=1：同一 id 反复传，kitty 原地替换而不是先删后画，切换不闪
-                head = (f"a=T,f=100,i={imgid},q=2,m={more}" if scale >= 0.99
-                        else f"a=T,f=100,i={imgid},c={cols},r={rows},C=1,q=2,m={more}")
+                head = f"a=T,f=100,i={imgid},c={cols},r={rows},C=1,q=2,m={more}"
             else:
                 head = f"m={more}"
             out.append(f"\033_G{head};{ch}\033\\")
@@ -1385,25 +1371,6 @@ def micro(W):
 
 
 # ── 主循环 ─────────────────────────────────────────────
-import threading
-_OUT_LOCK = threading.Lock()
-_BYTES = [0]
-_REAL_WRITE = sys.stdout.write
-
-
-class _CountingOut:
-    def __getattr__(self, k):
-        return getattr(sys.__stdout__, k)
-
-    def write(self, s):
-        _BYTES[0] += len(s)
-        with _OUT_LOCK:
-            return _REAL_WRITE(s)
-
-    def flush(self):
-        return sys.__stdout__.flush()
-
-
 def main():
     me = os.path.abspath(__file__)
     MT_FILE = "/tmp/ts_src_mtime"
@@ -1419,8 +1386,6 @@ def main():
         start_view = 0
     state = {"view": max(0, min(5, start_view)), "paused": False, "proc": False,
              "img_idx": load_pos()}
-    if os.environ.get("TRAIN_STATUS_DEBUG"):
-        sys.stdout = _CountingOut()
     keys = os.environ.get("TRAIN_STATUS_KEYS", "all")     # all | noq
     mouse = os.environ.get("TRAIN_STATUS_MOUSE", "1") != "0"
     fd = sys.stdin.fileno()
@@ -1453,47 +1418,21 @@ def main():
                     else:
                         path = preview_image(state["img_idx"])
                     key = f"{path}|{W}x{H}"
-                    if os.environ.get("TRAIN_STATUS_DEBUG"):
-                        try:
-                            open("/tmp/ts_draw.log","a").write(f"{time.time():.3f} path={os.path.basename(path)} key={key} drawn={state.get('drawn')}\n")
-                        except Exception:
-                            pass
                     if state.get("drawn") != key:        # 同一张图不重画，否则整屏每轮闪一下
                         g = cache("geom", 2, panel_geom)
                         sc = cache("scale", 30, output_scale)
                         px = (int(g[2] * sc), int(g[3] * sc)) if g else None
                         fresh = state.get("drawn") is None      # 从文字页切进来才需要清屏
-                        ring = state.setdefault("ring", {})      # path -> kitty 图 id
-                        nid = state.get("next_id", 100)
-                        shown = state.get("shown_id")
-                        if path in ring:                         # 传过：零负载摆放
-                            seq = kitty_place(ring[path])
-                            new_id = ring[path]
-                            fresh = fresh or False
-                            cache(f"full:{key}:{px}:0", 600, lambda: "")   # 占位，保持缓存结构一致
-                        else:                                    # 没传过：真传一次
-                            new_id = nid
-                            state["next_id"] = nid + 1
-                            seq = cache(f"full:{key}:{px}:{new_id}", 600,
-                                        lambda: kitty_img(path, W, H, 1, px, new_id))
-                            if seq:
-                                ring[path] = new_id
-                                if len(ring) > 12:                # 环形缓存，别把显存吃光
-                                    old_path, old_i = next(iter(ring.items()))
-                                    if old_i != shown:
-                                        sys.stdout.write(kitty_drop_img(old_i))
-                                        ring.pop(old_path, None)
+                        old_id = state.get("img_id", 1)
+                        new_id = 2 if old_id == 1 else 1
+                        seq = cache(f"full:{key}:{px}:{new_id}", 600,
+                                    lambda: kitty_img(path, W, H, 1, px, new_id))
                         if seq:
-                            if os.environ.get("TRAIN_STATUS_DEBUG"):
-                                try:
-                                    open("/tmp/ts_img.log","a").write(f"{time.time():.2f} emit {len(seq)//1024}KB fresh={fresh} new_id={new_id} ring={len(ring)}\n")
-                                except Exception:
-                                    pass
                             prefix = (DEL_IMG + "\033[H\033[J") if fresh else ""
-                            tail = "" if (fresh or shown is None) else kitty_drop_place(shown)
+                            # 先画新 id，再删旧 id：任何一帧都有图，不会闪白
+                            tail = "" if fresh else f"\033_Ga=d,d=i,i={old_id}\033\\"
                             sys.stdout.write(prefix + seq + tail + "\033[?25l")
                             state["img_id"] = new_id
-                            state["shown_id"] = new_id
                         else:                      # 图坏了别白屏，给一行说明
                             name = os.path.basename(path)[:max(8, W - 6)]
                             msg = [f"{HOT}这张读不出来{R}",
@@ -1505,31 +1444,15 @@ def main():
                                 sys.stdout.write(f"\033[{i * 2 + 2};2H" + clip(t, W - 2))
                             sys.stdout.write("\033[?25l")
                         sys.stdout.flush()
-                        # 预热：把接下来几张真的传给 kitty（占住 id），翻页时只摆放、不传像素
-                        def _prewarm(paths, px, W, H):
-                            for nf_ in paths:
-                                if nf_ in ring:
-                                    continue
-                                nid_ = state.get("next_id", 100)
-                                state["next_id"] = nid_ + 1
-                                sq = kitty_img(nf_, W, H, 1, px, nid_)
-                                if not sq:
-                                    continue
-                                with _OUT_LOCK:
-                                    sys.stdout.write(sq)
-                                    sys.stdout.flush()
-                                ring[nf_] = nid_
-                                if len(ring) > 12:
-                                    op, oi = next(iter(ring.items()))
-                                    if oi != state.get("shown_id"):
-                                        with _OUT_LOCK:
-                                            sys.stdout.write(kitty_drop_img(oi))
-                                            sys.stdout.flush()
-                                        ring.pop(op, None)
+                        # 预热下一张，翻页时不用等解码
                         try:
-                            total_n = len(image_list())
-                            ahead = [image_list()[(state["img_idx"] + k) % total_n] for k in (1, 2, 3)]
-                            threading.Thread(target=_prewarm, args=(ahead, px, W, H), daemon=True).start()
+                            import threading
+                            nxt_i = (state["img_idx"] + 1) % max(1, len(image_list()))
+                            nf = image_list()[nxt_i]
+                            for iid in (1, 2):
+                                threading.Thread(target=kitty_img,
+                                                 args=(nf, W, H, 1, px, iid),
+                                                 daemon=True).start()
                         except Exception:
                             pass
                         state["drawn"] = key
@@ -1541,13 +1464,7 @@ def main():
                     iv = float(os.environ.get("TRAIN_STATUS_INTERVAL", "") or 1.0)
                 except Exception:
                     iv = 1.0
-                nxt = time.time() + max(0.2, iv)
-                if os.environ.get("TRAIN_STATUS_DEBUG"):
-                    try:
-                        open("/tmp/ts_bytes.log", "a").write(f"{time.time():.2f} {_BYTES[0]}\n")
-                        _BYTES[0] = 0
-                    except Exception:
-                        pass     # 默认每秒刷一次
+                nxt = time.time() + max(0.2, iv)     # 默认每秒刷一次
 
             wait = max(0.05, nxt - time.time())
             if keys == "0" or not select.select([fd], [], [], wait)[0]:
