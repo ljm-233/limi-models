@@ -96,15 +96,26 @@ def cache(key, secs, fn):
 
 
 def alive(pat, ttl=2.0):
+    """真的在看"这个脚本在跑"：只比对 argv 里的脚本文件名，不在整条命令行里做子串匹配。
+    否则我自己跑的 shell 命令只要提到 train_network，就会误报成"训练中"。"""
     def probe():
         for pid in os.listdir("/proc"):
             if not pid.isdigit():
                 continue
             try:
-                if pat in open(f"/proc/{pid}/cmdline", "rb").read().decode("utf-8", "ignore"):
-                    return True
+                args = open(f"/proc/{pid}/cmdline", "rb").read().decode("utf-8", "ignore").split("\0")
             except Exception:
-                pass
+                continue
+            args = [a for a in args if a]
+            if not args:
+                continue
+            exe = os.path.basename(args[0])
+            if not (exe.startswith("python") or exe == "accelerate"):
+                continue                      # 只认 python 进程，shell/编辑器不算
+            for a in args[1:]:
+                base = os.path.basename(a)
+                if base == pat or base == pat + ".py" or base.startswith(pat + "."):
+                    return True
         return False
     return cache("alive:" + pat, ttl, probe)
 
@@ -356,6 +367,14 @@ def latest_weight():
         return None
 
 
+def idle_now():
+    """没有训练/出图/评分进程，且日志 10 分钟没更新 → 真空闲（不是在跑但卡住）"""
+    if alive("train_network") or alive("gen_detail") or alive("gen_face") or alive("eval_faces"):
+        return False
+    age = log_age()
+    return age is None or age > 600
+
+
 def stage():
     if alive("train_network"):
         return "训练"
@@ -363,6 +382,8 @@ def stage():
         return "出图"
     if alive("eval_faces"):
         return "评分"
+    if idle_now():
+        return "空闲"
     return "完成" if last_log() else "待机"
 
 
@@ -828,7 +849,8 @@ def page_data():
         f"{GRN}脸{R}{WH}{kinds.get('f', 0)}{R}  {BLU}上身{R}{WH}{kinds.get('b', 0)}{R}  "
         f"{VIO}半身{R}{WH}{kinds.get('u', 0)}{R}  {ORG}整图{R}{WH}{kinds.get('n', 0)}{R}",
         f"{YEL}标注{R} {WH}{tagged}{R}{DIM}/{len(fs)} 张（{cover}%）{R}",
-        f"{CYA}最近改动{R} {BLU}{age}前{R}",
+        f"{CYA}最近改动{R} {BLU}{time.strftime('%m-%d %H:%M', time.localtime(newest)) if newest else '—'}{R}"
+        f" {DIM}({age}前){R}",
         f"{DIM}在役{R} {BLU}{(pretty_model(in_use_lora()[0]) if in_use_lora() else '—')[:26]}{R}"
         f" {DIM}基线{R}{YEL}0.676{R}{DIM}/{YEL}7.33{R}",
     ]
@@ -1193,17 +1215,20 @@ def header(st, step, total, n_img, log_step=None, W=80):
         parts_full = full
     else:
         parts_full = name
-    ep = epoch_display(step, total, n_img)
+    ep = 0 if st in ("空闲", "待机") else epoch_display(step, total, n_img)
     tot = total_epochs()
-    color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
+    color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN, "空闲": DIM}.get(st, DIM)
     ep_txt = f"{WH}第{ep}{('/' + str(tot)) if tot else ''}轮{R}" if ep else ""
     view_txt = f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
 
     # 由长到短逐级尝试：全名 + 秒 + 页名 → 全名 → 只留项目名 → 去掉页名
     candidates = [
-        f"{GRN}●{R}{WH}{parts_full}{R} {DIM}{time.strftime('%H:%M:%S')}{R} {color}{st}{R} {ep_txt}{view_txt}",
-        f"{GRN}●{R}{WH}{parts_full}{R} {DIM}{time.strftime('%H:%M:%S')}{R} {color}{st}{R} {ep_txt}",
-        f"{GRN}●{R}{WH}{short}{R} {DIM}{time.strftime('%H:%M')}{R} {color}{st}{R} {ep_txt}",
+        f"{GRN}●{R}{WH}{parts_full}{R} {DIM}{time.strftime('%H:%M:%S')}{R} {color}{st}{R}"
+        f"{(' ' + ep_txt) if ep_txt else ''}{view_txt}",
+        f"{GRN}●{R}{WH}{parts_full}{R} {DIM}{time.strftime('%H:%M:%S')}{R} {color}{st}{R}"
+        f"{(' ' + ep_txt) if ep_txt else ''}",
+        f"{GRN}●{R}{WH}{short}{R} {DIM}{time.strftime('%H:%M')}{R} {color}{st}{R}"
+        f"{(' ' + ep_txt) if ep_txt else ''}",
         f"{GRN}●{R}{WH}{short}{R} {color}{st}{R}",
     ]
     for line in candidates:
@@ -1268,7 +1293,11 @@ def compact(W, state, H):
         rows.append((r, line))
         r += gap
     # 底部给整体进度：累计批次 vs 总批次（= 优化步 × 梯度累积）；拿不到就退回日志自己的数字
-    if step and total:
+    if st in ("空闲", "待机"):
+        lw = latest_weight()
+        tip = f"{DIM}空闲 · 无任务在跑{R}" + (f" {DIM}· 上次产出{R} {BLU}{os.path.basename(lw[0])}{R}" if lw else "")
+        b = [DIM + "─" * W + R, tip]
+    elif step and total:
         b = bottom(min(step, total), total, rate, W, batches_done(step))
     else:
         b = bottom(step, total, rate, W)
