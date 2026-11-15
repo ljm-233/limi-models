@@ -294,8 +294,9 @@ def parse(text):
     rate = v if last.group(4) == "it/s" else 1.0 / max(v, 1e-6)
     try:
         base = int(read(BASE_FILE).strip())
-        step += base
-        total += base
+        if 0 < base < total * 20:          # 明显是脏值就不加，别把 200/200 变成 7200/200
+            step += base
+            total += base
     except Exception:
         pass
     return step, total, rate, losses
@@ -312,7 +313,7 @@ def progress():
         stale = p and time.time() - os.path.getmtime(p) > 60
     except Exception:
         stale = False
-    if stale:
+    if stale and alive("train_network"):    # 只有训练进程还在时，才用存档步数兜底
         best = 0
         for f in glob.glob(f"{TRAIN}/out_*/*-step*.safetensors"):
             m = re.search(r"-step(\d+)", os.path.basename(f))
@@ -890,6 +891,8 @@ def page_log(W, step, total, losses):
     mid = f"{DIM}进度{R}{WH}{step or 0}{DIM}/{total or 0}{R} {bad} {YEL if warn else DIM}警 {warn}{R}"
     if losses:
         mid += f" {DIM}loss{R}{WH}{losses[-1]:.4f}{R}"
+    if idle_now():
+        mid = f"{DIM}空闲 · 这条是历史日志{R}"
     out = [head, mid]
 
     if not lines:                                   # 没有关键行就退一步：给最近一条非进度行
