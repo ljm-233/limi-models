@@ -898,6 +898,16 @@ THUMB_W, THUMB_H = 1280, 800          # 原图缓存尺寸（按比例，供不�
 CELL_W, CELL_H = 16, 36               # 一个字符格大约多少像素（kitty 默认识别）
 
 
+def src_thumb(path):
+    """原图 → 1280×800 的源缓存（只做一次，之后所有尺寸都从它派生）"""
+    try:
+        st = os.stat(path)
+        key = f"src|{path}|{st.st_mtime_ns}"
+    except Exception:
+        key = f"src|{path}"
+    return os.path.join(THUMB_DIR, hashlib.sha1(key.encode()).hexdigest() + ".png")
+
+
 def thumb(path, cols=0, rows=0, px=None):
     """缓存键含格数：拉伸版按窗口尺寸单独存，换尺寸才重做"""
     try:
@@ -918,28 +928,39 @@ def _legacy_thumb(path, cols, rows):
 
 
 def kitty_img(path, cols, rows, row=1, px=None):
-    """把图拉伸到 cols×rows 个字符格对应的像素框，铺满窗口（不改比例，会变形）"""
+    """把图拉伸到窗口像素尺寸（px）铺满，或退回格数估算"""
     if not path:
         return ""
     try:
         from PIL import Image
         import io, base64
+        Image.MAX_IMAGE_PIXELS = None          # 原图有上亿像素，别被"解压炸弹"拦下
         if px:
             tw, th = max(16, int(px[0])), max(16, int(px[1]))
         else:
             tw, th = max(16, cols * CELL_W), max(16, rows * CELL_H)
+
         tp = thumb(path, cols, rows, px)
         png = open(tp, "rb").read() if os.path.exists(tp) else None
         if png is None:
-            os.makedirs(THUMB_DIR, exist_ok=True)
-            im = Image.open(path)
-            im.draft("RGB", (tw * 2, th * 2))
-            im = im.convert("RGB").resize((tw, th), Image.LANCZOS)   # 硬拉伸
+            src = src_thumb(path)
+            if not os.path.exists(src):        # 源缓存：一天只需要为每张图做一次
+                os.makedirs(THUMB_DIR, exist_ok=True)
+                im = Image.open(path)
+                im.draft("RGB", (2560, 1600))
+                im = im.convert("RGB")
+                im.thumbnail((THUMB_W, THUMB_H), Image.LANCZOS)
+                buf = io.BytesIO()
+                im.save(buf, format="PNG")
+                open(src + ".tmp", "wb").write(buf.getvalue())
+                os.replace(src + ".tmp", src)
+            im = Image.open(src).convert("RGB").resize((tw, th), Image.LANCZOS)
             buf = io.BytesIO()
             im.save(buf, format="PNG")
             png = buf.getvalue()
             open(tp + ".tmp", "wb").write(png)
             os.replace(tp + ".tmp", tp)
+
         data = base64.standard_b64encode(png).decode("ascii")
         parts = [data[i:i + 3800] for i in range(0, len(data), 3800)]
         n = len(parts)
@@ -947,12 +968,8 @@ def kitty_img(path, cols, rows, row=1, px=None):
         for i, ch in enumerate(parts):
             more = 0 if i == n - 1 else 1
             if i == 0:      # 只有第一块带完整参数，后续块只带 m 和负载
-                # 有像素尺寸时不指定格数：kitty 按原生像素铺，正好等于窗口内区，
-                # 指定 c/r 反而会被取整成更小的格网区域，四周留边
-                if px:
-                    head = f"a=T,f=100,C=1,q=2,m={more}"
-                else:
-                    head = f"a=T,f=100,c={cols},r={rows},C=1,q=2,m={more}"
+                head = f"a=T,f=100,C=1,q=2,m={more}" if px else \
+                       f"a=T,f=100,c={cols},r={rows},C=1,q=2,m={more}"
             else:
                 head = f"m={more}"
             out.append(f"\033_G{head};{ch}\033\\")
@@ -1162,7 +1179,7 @@ def footer(state, W):
 def draw(rows, W):
     out = [DEL_IMG, "\033[H\033[J"]
     for row, txt in rows:
-        out.append(f"\033[{row};1H" + clip(fit(txt, W), W) + "\033[K")
+        out.append(f"\033[{row};1H " + clip(fit(txt, W - 1), W - 1) + "\033[K")
     sys.stdout.write("".join(out))
     sys.stdout.flush()
 
@@ -1241,7 +1258,18 @@ def main():
                         px = (int(g[2] * sc), int(g[3] * sc)) if g else None
                         seq = cache(f"full:{key}:{px}", 600,
                                     lambda: kitty_img(path, W, H, 1, px))
-                        sys.stdout.write(DEL_IMG + "\033[H\033[J" + seq + "\033[?25l")
+                        if seq:
+                            sys.stdout.write(DEL_IMG + "\033[H\033[J" + seq + "\033[?25l")
+                        else:                      # 图坏了别白屏，给一行说明
+                            name = os.path.basename(path)[:max(8, W - 6)]
+                            msg = [f"{HOT}这张读不出来{R}",
+                                   f"{BLU}{name}{R}",
+                                   f"{DIM}第 {state['img_idx'] + 1}/{len(image_list())} 张{R}",
+                                   f"{DIM}w/s 或滚轮换下一张{R}"]
+                            sys.stdout.write(DEL_IMG + "\033[H\033[J")
+                            for i, t in enumerate(msg):
+                                sys.stdout.write(f"\033[{i * 2 + 2};2H" + clip(t, W - 2))
+                            sys.stdout.write("\033[?25l")
                         sys.stdout.flush()
                         state["drawn"] = key
                 else:

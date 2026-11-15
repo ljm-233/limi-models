@@ -24,5 +24,5 @@ L=$(python3 -c "print(max(10, round($PX/1.194/24.6)))")
 exec env TRAIN_STATUS_RESIZE=0 TRAIN_STATUS_KEYS=noq kitty --instance-group trainstatus --class trainstatus --title "马吉训练" \
     -o remember_window_size=no \
     -o initial_window_width=${C}c -o initial_window_height=${L}c \
-    -o window_padding_width=2 \
+    -o window_padding_width=0 \
     /home/link/.dsh/miyu/scripts/train-status.sh loop
