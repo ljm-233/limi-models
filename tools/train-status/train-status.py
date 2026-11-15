@@ -701,7 +701,7 @@ def page_flow(step, total, n_img, st, rate):
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "—")),
         ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
         ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
-        ("训练", "" if st in ("空闲", "待机") else _train_sub(ep, tot),
+        ("训练", "" if st in ("空闲", "待机", "完成") else _train_sub(ep, tot),
          train_dur if st != "完成" else (f"已结束 · {lw_name}" if lw_name else "已结束")),
         ("出图", cache("nsample2", 5, lambda: f"本次 {_shot_count()} 张"), times.get("出图", "—")),
         ("评分", "相似度+纹理", times.get("评分", "—")),
@@ -1255,7 +1255,7 @@ def header(st, step, total, n_img, log_step=None, W=80):
         parts_full = full
     else:
         parts_full = name
-    ep = 0 if st in ("空闲", "待机") else epoch_display(step, total, n_img)
+    ep = 0 if st in ("空闲", "待机", "完成") else epoch_display(step, total, n_img)
     tot = total_epochs()
     color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN, "空闲": DIM}.get(st, DIM)
     ep_txt = f"{WH}第{ep}{('/' + str(tot)) if tot else ''}轮{R}" if ep else ""
@@ -1333,12 +1333,13 @@ def compact(W, state, H):
         rows.append((r, line))
         r += gap
     # 底部给整体进度：累计批次 vs 总批次（= 优化步 × 梯度累积）；拿不到就退回日志自己的数字
-    if st in ("空闲", "待机"):
+    if st in ("空闲", "待机", "完成"):
         lw = latest_weight()
         nm = os.path.basename(lw[0]).rsplit(".", 1)[0] if lw else ""
-        cands = [f"{DIM}空闲 · 无任务在跑{R} {DIM}· 上次产出{R} {BLU}{nm}{R}",
-                 f"{DIM}空闲{R} {DIM}· 上次{R} {BLU}{nm}{R}",
-                 f"{DIM}空闲{R}"]
+        head_word = "完成" if st == "完成" else "空闲"
+        cands = [f"{DIM}{head_word} · 无任务在跑{R} {DIM}· 上次产出{R} {BLU}{nm}{R}",
+                 f"{DIM}{head_word}{R} {DIM}· 上次{R} {BLU}{nm}{R}",
+                 f"{DIM}{head_word}{R}"]
         tip = next((c for c in cands if wlen(c) <= W - 1), cands[-1])
         b = [DIM + "─" * W + R, tip]
     elif step and total:
