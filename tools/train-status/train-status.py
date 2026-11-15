@@ -1491,13 +1491,17 @@ def cycle_size(step):
 def header(st, step, total, n_img, log_step=None, W=80):
     lora = in_use_lora()
     name = read(f"{TRAIN}/.project_name", "马吉 v3").strip() or "马吉 v3"
-    short = name
-    if lora:
-        full = pretty_model(lora[0])                       # 马吉 sdxl·id·v2
-        short = full.split(" ")[0]                         # 马吉
-        parts_full = full
-    else:
-        parts_full = name
+    # 标题优先显示「这一版在做的」：正在训的 > 目标已定但还没开跑 > 在役权重
+    run = cache("currun", 5, current_run)
+    pend = cache("pend", 30, pending_output)
+    target = ""
+    if run and run[1]:
+        target = run[1]
+    elif pend and st in ("切图", "训练"):
+        target = pend
+    full = pretty_model((target or (lora[0] if lora else "")) + ".safetensors") if (target or lora) else name
+    short = full.split(" ")[0] if full else name
+    parts_full = full or name
     ep = 0 if st in ("空闲", "待机", "完成") else epoch_display(step, total, n_img)
     tot = total_epochs()
     color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN, "空闲": DIM}.get(st, DIM)
@@ -1670,6 +1674,37 @@ def micro(W):
 
 
 # ── 主循环 ─────────────────────────────────────────────
+def pending_output():
+    """还没开跑时，从训练脚本里找这一版的目标名（切图阶段也能显示 v4）"""
+    import glob as _g
+    for f in sorted(_g.glob(f"{TRAIN}/train_*.sh"), key=os.path.getmtime, reverse=True):
+        try:
+            txt = open(f, encoding="utf-8", errors="ignore").read()
+        except Exception:
+            continue
+        if "dataset_v3_png" not in txt:      # 只认当前这版的数据集
+            continue
+        m = re.search(r"--output_name\s+(\S+)", txt)
+        if m:
+            return m.group(1).strip("\\ ")
+    return ""
+
+
+def self_place():
+    """把自己的窗口按到当前工作区：niri 有时会把浮动窗丢在 workspace=None 上"""
+    try:
+        out = subprocess.run(["niri", "msg", "--json", "windows"], capture_output=True, timeout=3).stdout
+        for w in json.loads(out):
+            if w.get("app_id") != "trainstatus":
+                continue
+            if w.get("workspace_id") is None or not w.get("is_floating"):
+                subprocess.run(["niri", "msg", "action", "move-window-to-workspace",
+                                "--window-id", str(w["id"]), "1"], timeout=3,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def main():
     me = os.path.abspath(__file__)
     MT_FILE = "/tmp/ts_src_mtime"
@@ -1689,6 +1724,7 @@ def main():
     mouse = os.environ.get("TRAIN_STATUS_MOUSE", "1") != "0"
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
+    self_place()
     sys.stdout.write("\033_Ga=d,d=i,i=7\033\\")   # 清掉上一版留下的底图，别让它盖着窗口
     sys.stdout.write("\033[?1049h\033[?25l" + ("\033[?1000h\033[?1006h" if mouse else ""))
     last_reload = 0.0
