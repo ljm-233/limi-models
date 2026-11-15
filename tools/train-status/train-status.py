@@ -247,20 +247,24 @@ def log_text(path):
 
 
 def parse(text):
-    step = total = rate = None
+    """只看最后一条进度行：步数、总数、速度、loss 都取它，避免混用不同轮的行"""
+    last = None
     losses = []
     for line in text.splitlines():
         m = re.search(r"(\d+)/(\d+)\s*\[[\d:]+<[\d:]+,\s*([\d.]+)(it/s|s/it)(?:,\s*avr_loss=([\d.]+))?", line)
         if m:
-            step, total = int(m.group(1)), int(m.group(2))
-            v = float(m.group(3))
-            rate = v if m.group(4) == "it/s" else 1.0 / max(v, 1e-6)
+            last = m
             if m.group(5):
                 losses.append(float(m.group(5)))
+    if not last:
+        return None, None, None, losses
+    step, total = int(last.group(1)), int(last.group(2))
+    v = float(last.group(3))
+    rate = v if last.group(4) == "it/s" else 1.0 / max(v, 1e-6)
     try:
         base = int(read(BASE_FILE).strip())
-        step = step + base if step is not None else None
-        total = total + base if total is not None else None
+        step += base
+        total += base
     except Exception:
         pass
     return step, total, rate, losses
@@ -312,15 +316,39 @@ def epochs_of(step, per):
     return (step // per + 1) if (step and per) else 0
 
 
+EPOCH_STATE = f"{TRAIN}/.epoch_state.json"
+_CUM = 0
+
+
 def epoch_display(step, total, n_img):
-    """统一口径：日志给的是全局批次就按总数算，给的是单轮批次就用翻轮记录"""
+    """轮次 = 累计批次 // 每轮批次 + 1。
+    累计批次靠累加进度条增量得到（每秒刷新，掉头也能接上），
+    初次启动时用日志里"跑满一轮"的痕迹做种子。"""
     if not (step and n_img):
         return 0
-    if total and abs(total - n_img) <= 1:      # 日志 total 就是一轮样本数
-        return epoch_cur(step, n_img)
-    if total and total > n_img * 1.5:          # 日志直接报全局批次
-        return epochs_of(step, n_img)
-    return 0
+    try:
+        st = json.load(open(EPOCH_STATE))
+    except Exception:
+        st = {}
+    if "cum" not in st:
+        raw = log_text(last_log())
+        base = n_img if f"{n_img}/{n_img}" in raw else 0
+        st = {"cum": base + step, "last": step}
+    else:
+        last = int(st.get("last", 0))
+        cum = int(st.get("cum", 0))
+        if step > last:
+            cum += step - last
+        elif step < last:                   # 换轮：从 0 重新数
+            cum += step
+        st = {"cum": cum, "last": step}
+    try:
+        json.dump(st, open(EPOCH_STATE, "w"))
+    except Exception:
+        pass
+    global _CUM
+    _CUM = int(st.get("cum", 0))
+    return _CUM // n_img + 1
 
 
 def max_steps():
@@ -955,7 +983,7 @@ def header(st, step, total, n_img, log_step=None):
     return f"{GRN}●{R} {WH}{name}{R} {DIM}{time.strftime('%H:%M:%S')}{R}{tail}"
 
 
-def bottom(step, total, rate, W):
+def bottom(step, total, rate, W, cum=0):
     if not (step and total and rate):
         return [DIM + "━" * max(1, W // 2) + "─" * max(1, W - W // 2) + R, f"{DIM}等待数据{R}"]
     pct = step * 100 // total
@@ -970,8 +998,9 @@ def bottom(step, total, rate, W):
     pc = GRN if pct >= 100 else (VIO if pct >= 75 else (BLU if pct >= 40 else CYA))
     left_col = HOT if left > 1800 else (YEL if left > 600 else GRN)
     speed = f" {DIM}{rate:.2f}it/s{R}" if rate else ""
+    cumtxt = f" {DIM}累计{R}{BLU}{cum}{R}" if cum else ""
     for txt in (f"{WH}{step}{DIM}/{total}{R} {pc}{pct}%{R} {DIM}剩{R}{left_col}{remain}{R} "
-                f"{DIM}至{R}{BLU}{eta}{R}{speed}",
+                f"{DIM}至{R}{BLU}{eta}{R}{speed}{cumtxt}",
                 f"{WH}{step}{DIM}/{total}{R} {pc}{pct}%{R} {DIM}剩{R}{left_col}{remain}{R} {DIM}至{R}{BLU}{eta}{R}",
                 f"{WH}{step}{DIM}/{total}{R} {pc}{pct}%{R} {DIM}剩{R}{left_col}{remain}{R}",
                 f"{WH}{step}{DIM}/{total}{R} {pc}{pct}%{R}"):
@@ -1006,10 +1035,9 @@ def compact(W, state, H):
             break
         rows.append((r, line))
         r += 2
-    # 日志里的 step/total 是数据批次；max_train_steps 是优化步（含梯度累积），两者单位不同，
-    # 所以一律照日志显示，不拿 max_train_steps 去夹，避免出现 100% 还在跑
+    # 底部给整体进度：累计批次 vs 总批次（= 优化步 × 梯度累积）；拿不到就退回日志自己的数字
     if step and total:
-        b = bottom(min(step, total), total, rate, W)
+        b = bottom(min(step, total), total, rate, W, _CUM)
     else:
         b = bottom(step, total, rate, W)
     rows += [(max(3, H - 2), b[0]), (max(3, H - 1), b[1]), (max(3, H), footer(state, W))]
