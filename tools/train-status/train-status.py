@@ -35,6 +35,7 @@ IMV_PID = "/tmp/ts_imv.pid"
 IMG_POS = f"{TRAIN}/.img_pos"
 
 R = "\033[0m"
+BOLD = "\033[1m"
 DIM = "\033[38;5;240m"
 TXT = "\033[38;5;252m"
 WH = "\033[38;2;235;240;255m"
@@ -740,11 +741,16 @@ def page_flow(step, total, n_img, st, rate):
         ("缓存", cache("cacherow", 1.0, lambda: _cache_sub()), cache("cachedur", 1.0, lambda: _cache_dur())),
         ("训练", "" if st in ("空闲", "待机", "完成") else _train_sub(ep, tot),
          train_dur if st != "完成" else (f"已结束 · {lw_name}" if lw_name else "已结束")),
-        ("出图", cache("nsample2", 5, lambda: f"本次 {_shot_count()} 张"), times.get("出图", "—")),
-        ("评分", "相似度+纹理", times.get("评分", "—")),
+        ("出图", ("待训练完成" if st in ("训练",) else cache("nsample2", 5, lambda: f"本次 {_shot_count()} 张")),
+         times.get("出图", "—")),
+        ("评分", ("待出图" if st in ("训练", "出图") else "相似度+纹理"), times.get("评分", "—")),
     ]
     names = [r[0] for r in rows]
-    if st in names:
+    csub = cache("cacherow", 1.0, lambda: _cache_sub())
+    cache_running = bool(csub) and not progress()[0] and st == "训练"
+    if cache_running:
+        now = names.index("缓存")      # 缓存还没跑完，光标停在缓存这一行
+    elif st in names:
         now = names.index(st)
     elif st in ("空闲", "待机"):
         now = -1                      # 没有正在跑的步骤：谁都不打勾
@@ -1384,7 +1390,7 @@ def compact(W, state, H):
         if cd and ct:
             pct = cd * 100 // ct
             filled = max(1, min(W, int(W * cd / ct)))
-            b = [CYA + "━" * filled + DIM + "─" * max(1, W - filled) + R,
+            b = [f"{BOLD}{CYA}" + "━" * filled + f"{R}{DIM}" + "─" * max(1, W - filled) + R,
                  f"{CYA}缓存 latent{R} {WH}{cd}/{ct}{R} {DIM}{pct}%{R}"]
         else:
             b = [DIM + "━" * max(1, W // 2) + "─" * max(1, W - W // 2) + R, f"{DIM}等待数据{R}"]
