@@ -8,19 +8,19 @@ ljm 和米鱼一起养的模型配置库。`limi` = ljm + miyu。
 
 | 模型 | 版本 | 定位 | 权重 |
 | --- | --- | --- | --- |
-| 嗷呜虎虎 | v1 | 只训脸的第一版 | `seo_face_sd15.safetensors` 38MB |
-| 嗷呜虎虎 | v2 | 脸/身体拆开训 | `seo_v2_800` / `seo_face_v2_2400` 38MB |
-| 嗷呜虎虎 | v3 | 身体单训，640 | `seo_body_v3.safetensors` 38MB |
-| 嗷呜虎虎 | v3.1 | 脸身合并 | `seo_v3.1.safetensors` 38MB |
-| 嗷呜虎虎 | v3.2 | 换数据再训 | `seo_v3.2.safetensors` 38MB |
-| 嗷呜虎虎 | v3.3 | 脸倒退，弃用 | `seo_v3.3.safetensors` 38MB |
-| 嗷呜虎虎 | v3.4 | v3 线里唯一能用的 | `seo_v3.4.safetensors` 38MB |
-| 嗷呜虎虎 | v4 | 混合训练，768，双头开始出现 | `seo_v4.safetensors` 27MB |
-| 嗷呜虎虎 | v5 | 按比例重裁，衣服成型 | `seo_v5.safetensors` 27MB |
-| 嗷呜虎虎 | v5.1 | 稳，出错率最低 | `seo_v5.1.safetensors` 54MB |
-| 嗷呜虎虎 | v5.2 | 细节最强，脸被稀释 | `seo_v5.2.safetensors` 82MB |
-| 嗷呜虎虎 | v5.3 | 结构最松，弃用 | `seo_v5.3.safetensors` 54MB |
-| 嗷呜虎虎 | v5.4 | 画质最好，脸最立体（现主力） | `aowo_huhu_v5.4.safetensors` 54MB |
+| 嗷呜虎虎 | v1 | 只训脸的第一版 | `aowo_sd15_id_v0a.safetensors` 38MB |
+| 嗷呜虎虎 | v2 | 脸/身体拆开训 | `aowo_sd15_char_v2` / `aowo_sd15_id_v0c` 38MB |
+| 嗷呜虎虎 | v3 | 身体单训，640 | `aowo_sd15_body_v3.safetensors` 38MB |
+| 嗷呜虎虎 | v3.1 | 脸身合并 | `aowo_sd15_char_v3_1.safetensors` 38MB |
+| 嗷呜虎虎 | v3.2 | 换数据再训 | `aowo_sd15_char_v3_2.safetensors` 38MB |
+| 嗷呜虎虎 | v3.3 | 脸倒退，弃用 | `aowo_sd15_char_v3_3.safetensors` 38MB |
+| 嗷呜虎虎 | v3.4 | v3 线里唯一能用的 | `aowo_sd15_char_v3_4.safetensors` 38MB |
+| 嗷呜虎虎 | v4 | 混合训练，768，双头开始出现 | `aowo_sd15_char_v4.safetensors` 27MB |
+| 嗷呜虎虎 | v5 | 按比例重裁，衣服成型 | `aowo_sd15_char_v5.safetensors` 27MB |
+| 嗷呜虎虎 | v5.1 | 稳，出错率最低 | `aowo_sd15_char_v5_1.safetensors` 54MB |
+| 嗷呜虎虎 | v5.2 | 细节最强，脸被稀释 | `aowo_sd15_char_v5_2.safetensors` 82MB |
+| 嗷呜虎虎 | v5.3 | 结构最松，弃用 | `aowo_sd15_char_v5_3.safetensors` 54MB |
+| 嗷呜虎虎 | v5.4 | 画质最好，脸最立体（现主力） | `aowo_sd15_char_v5_4.safetensors` 54MB |
 | 马吉 Machi | v1 | 第二个人，两套 cos 素材（714 张） | `machi_sd15_legacy_v1.safetensors` 52MB |
 | 马吉 Machi | v2 | 原生分辨率重切（729 张），结构更稳 | `machi_sd15_legacy_v2.safetensors` 52MB |
 
