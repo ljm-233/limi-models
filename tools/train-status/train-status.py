@@ -1295,7 +1295,11 @@ def compact(W, state, H):
     # 底部给整体进度：累计批次 vs 总批次（= 优化步 × 梯度累积）；拿不到就退回日志自己的数字
     if st in ("空闲", "待机"):
         lw = latest_weight()
-        tip = f"{DIM}空闲 · 无任务在跑{R}" + (f" {DIM}· 上次产出{R} {BLU}{os.path.basename(lw[0])}{R}" if lw else "")
+        nm = os.path.basename(lw[0]).rsplit(".", 1)[0] if lw else ""
+        cands = [f"{DIM}空闲 · 无任务在跑{R} {DIM}· 上次产出{R} {BLU}{nm}{R}",
+                 f"{DIM}空闲{R} {DIM}· 上次{R} {BLU}{nm}{R}",
+                 f"{DIM}空闲{R}"]
+        tip = next((c for c in cands if wlen(c) <= W - 1), cands[-1])
         b = [DIM + "─" * W + R, tip]
     elif step and total:
         b = bottom(min(step, total), total, rate, W, batches_done(step))
