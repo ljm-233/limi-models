@@ -964,9 +964,10 @@ def kitty_img(path, cols, rows, row=1, px=None, imgid=1):
     if not path:
         return ""
     try:
-        from PIL import Image
+        from PIL import Image, ImageFile
         import io, base64
-        Image.MAX_IMAGE_PIXELS = None          # 原图有上亿像素，别被"解压炸弹"拦下
+        Image.MAX_IMAGE_PIXELS = None
+        ImageFile.LOAD_TRUNCATED_IMAGES = True   # 截断的 JPEG 也照样解，imv 能看它就该能看          # 原图有上亿像素，别被"解压炸弹"拦下
         if px:
             tw, th = max(16, int(px[0])), max(16, int(px[1]))
         else:

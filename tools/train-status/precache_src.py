@@ -3,7 +3,7 @@
 import importlib.util, os, sys, time
 from PIL import Image, ImageFile
 Image.MAX_IMAGE_PIXELS = None
-ImageFile.LOAD_TRUNCATED_IMAGES = False
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 spec = importlib.util.spec_from_file_location("ts", "/home/link/.dsh/miyu/scripts/train-status.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 files = m.image_list()
