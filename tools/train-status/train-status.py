@@ -452,7 +452,7 @@ def heat(v, warn, danger):
 
 
 def line_cpu():
-    c, t = cpu_pct(), cpu_temp()
+    c, t = cache("cpu", 2, lambda: (cpu_pct(), cpu_temp()))
     s = (f"{CYA}CPU{R} {heat(c, 60, 85)}{c:>3}%{R} "
          f"{DIM}负载{R}{BLU}{load1():.1f}{R}")
     if t:
@@ -461,7 +461,7 @@ def line_cpu():
 
 
 def line_gpu():
-    g = gpu()
+    g = cache("gpu", 2, gpu)
     if not g:
         return f"{DIM}GPU{R} {DIM}无数据{R}"
     u, used, tot, t, pw, lim = g
@@ -968,8 +968,9 @@ def kitty_img(path, cols, rows, row=1, px=None):
         for i, ch in enumerate(parts):
             more = 0 if i == n - 1 else 1
             if i == 0:      # 只有第一块带完整参数，后续块只带 m 和负载
-                head = f"a=T,f=100,C=1,q=2,m={more}" if px else \
-                       f"a=T,f=100,c={cols},r={rows},C=1,q=2,m={more}"
+                # i=1：同一 id 反复传，kitty 原地替换而不是先删后画，切换不闪
+                head = f"a=T,f=100,i=1,C=1,q=2,m={more}" if px else \
+                       f"a=T,f=100,i=1,c={cols},r={rows},C=1,q=2,m={more}"
             else:
                 head = f"m={more}"
             out.append(f"\033_G{head};{ch}\033\\")
@@ -1253,13 +1254,15 @@ def main():
                         path = preview_image(state["img_idx"])
                     key = f"{path}|{W}x{H}"
                     if state.get("drawn") != key:        # 同一张图不重画，否则整屏每轮闪一下
-                        g = panel_geom()
-                        sc = output_scale()
+                        g = cache("geom", 2, panel_geom)
+                        sc = cache("scale", 30, output_scale)
                         px = (int(g[2] * sc), int(g[3] * sc)) if g else None
                         seq = cache(f"full:{key}:{px}", 600,
                                     lambda: kitty_img(path, W, H, 1, px))
+                        fresh = state.get("drawn") is None      # 从文字页切进来才需要清屏
                         if seq:
-                            sys.stdout.write(DEL_IMG + "\033[H\033[J" + seq + "\033[?25l")
+                            prefix = (DEL_IMG + "\033[H\033[J") if fresh else ""
+                            sys.stdout.write(prefix + seq + "\033[?25l")
                         else:                      # 图坏了别白屏，给一行说明
                             name = os.path.basename(path)[:max(8, W - 6)]
                             msg = [f"{HOT}这张读不出来{R}",
@@ -1271,6 +1274,15 @@ def main():
                                 sys.stdout.write(f"\033[{i * 2 + 2};2H" + clip(t, W - 2))
                             sys.stdout.write("\033[?25l")
                         sys.stdout.flush()
+                        # 预热下一张，翻页时不用等解码
+                        try:
+                            import threading
+                            nxt_i = (state["img_idx"] + 1) % max(1, len(image_list()))
+                            nf = image_list()[nxt_i]
+                            threading.Thread(target=kitty_img, args=(nf, W, H, 1, px),
+                                             daemon=True).start()
+                        except Exception:
+                            pass
                         state["drawn"] = key
                 else:
                     rows, _, _ = compact(W, state, H)
