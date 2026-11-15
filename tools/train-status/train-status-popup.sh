@@ -25,7 +25,7 @@ env TRAIN_STATUS_RESIZE=0 TRAIN_STATUS_KEYS=noq kitty --instance-group trainstat
     -o remember_window_size=no \
     -o initial_window_width=${C}c -o initial_window_height=${L}c \
     -o window_padding_width=0 \
-    -o background_opacity=${TRAIN_STATUS_OPACITY:-0.15} \
+    -o background_opacity=${TRAIN_STATUS_OPACITY:-0.42} \
     /home/link/.dsh/miyu/scripts/train-status.sh loop &
 
 # 等窗口出现，把它按到「当前工作区」，否则浮动窗会挂在 workspace=None 上，
