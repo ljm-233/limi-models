@@ -1166,8 +1166,9 @@ def image_list():
                 return _sorted(_drop(lst))
         except Exception:
             pass
-        if os.path.exists(f"{TRAIN}/report_v3.csv"):
-            return _sorted(_drop([r["file"] for r in csv.DictReader(open(f"{TRAIN}/report_v3.csv"))
+        rep = f"{TRAIN}/report_v5.csv" if os.path.exists(f"{TRAIN}/report_v5.csv") else f"{TRAIN}/report_v3.csv"
+        if os.path.exists(rep):
+            return _sorted(_drop([r["file"] for r in csv.DictReader(open(rep))
                                   if os.path.exists(r["file"])]))
         return _sorted(_drop(glob.glob(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")))
     lst = cache("imgs", 60, _load)
