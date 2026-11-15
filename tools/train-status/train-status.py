@@ -821,10 +821,12 @@ def cycle_size(step):
 def header(st, step, total, n_img, log_step=None):
     name = read(f"{TRAIN}/.project_name", "马吉 v3").strip() or "马吉 v3"
     ls = log_step if log_step is not None else step
-    if absolute_mode(step, total):
+    if n_img and total and abs(total - n_img) <= 1:      # 日志的 total 就是一轮的样本数
+        ep = epochs_of(step, n_img)
+    elif n_img and total and total > n_img * 1.5:        # 日志直接报全局批次
         ep = epochs_of(step, n_img)
     else:
-        ep = epoch_cur(ls, n_img) if (ls and n_img) else 0
+        ep = 0
     color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
     tail = f" {color}{st}{R}" + (f" {WH}第{ep}轮{R}" if ep else "")
     tail += f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
@@ -876,16 +878,10 @@ def compact(W, state, H):
             break
         rows.append((r, line))
         r += 2
-    per, ms = n_img, max_steps()
-    if absolute_mode(step, total):
-        b = bottom(min(step or 0, total or 0), total, rate, W)
-    elif per and ms:
-        if src == "ckpt":
-            done = min(ms, step or 0)          # 存档步数本身就是全局步数
-        else:
-            ep_now = max(1, epoch_cur(log_step or step, per))
-            done = min(ms, (ep_now - 1) * per + (step or 0))
-        b = bottom(done, ms, rate, W)
+    # 日志里的 step/total 是数据批次；max_train_steps 是优化步（含梯度累积），两者单位不同，
+    # 所以一律照日志显示，不拿 max_train_steps 去夹，避免出现 100% 还在跑
+    if step and total:
+        b = bottom(min(step, total), total, rate, W)
     else:
         b = bottom(step, total, rate, W)
     rows += [(max(3, H - 2), b[0]), (max(3, H - 1), b[1]), (max(3, H), footer(state, W))]
@@ -942,7 +938,12 @@ def micro(W):
 # ── 主循环 ─────────────────────────────────────────────
 def main():
     me = os.path.abspath(__file__)
+    MT_FILE = "/tmp/ts_src_mtime"
     mt = os.path.getmtime(me) if os.path.exists(me) else 0
+    try:
+        open(MT_FILE, "w").write(str(mt))
+    except Exception:
+        pass
     W, H = tsize()
     state = {"view": 0, "paused": False, "proc": False, "img_idx": load_pos()}
     keys = os.environ.get("TRAIN_STATUS_KEYS", "all")     # all | noq
@@ -950,13 +951,16 @@ def main():
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     sys.stdout.write("\033[?1049h\033[?25l" + ("\033[?1000h\033[?1006h" if mouse else ""))
+    last_reload = 0.0
     nxt = time.time()
     try:
         tty.setcbreak(fd)
         while True:
             try:
-                if os.path.exists(me) and os.path.getmtime(me) != mt:
-                    os.execv(sys.executable, [sys.executable, me])
+                if (os.path.exists(me) and os.path.getmtime(me) != mt
+                        and time.time() - last_reload > 1.5):
+                    last_reload = time.time()
+                    raise SystemExit(42)          # 交给外层壳重新拉起，避免 execv 卡住终端状态
             except Exception:
                 pass
 
