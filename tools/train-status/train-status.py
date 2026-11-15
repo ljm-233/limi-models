@@ -114,7 +114,7 @@ def alive(pat, ttl=2.0):
                 continue                      # 只认 python 进程，shell/编辑器不算
             for a in args[1:]:
                 base = os.path.basename(a)
-                if base == pat or base == pat + ".py" or base.startswith(pat + "."):
+                if base.endswith(".py") and pat in base:     # train_network / sdxl_train_network 都认
                     return True
         return False
     return cache("alive:" + pat, ttl, probe)
@@ -282,6 +282,9 @@ def parse(text):
     last = None
     losses = []
     for line in text.splitlines():
+        # 只认训练自己的进度条（以 steps: 开头）；缓存 latent 的那些 "[数字]" 行不算
+        if "steps:" not in line and "steps " not in line:
+            continue
         m = re.search(r"(\d+)/(\d+)\s*\[[\d:]+<[\d:]+,\s*([\d.]+)(it/s|s/it)(?:,\s*avr_loss=([\d.]+))?", line)
         if m:
             last = m
@@ -300,6 +303,22 @@ def parse(text):
     except Exception:
         pass
     return step, total, rate, losses
+
+
+def cache_progress():
+    """缓存 latent 阶段：日志里只有 "659/2959 [..it/s]" 这种行，没有 steps: 前缀"""
+    p = last_log()
+    txt = cache("cacheprog:" + str(p), 0.5, lambda: log_text(p))
+    last = None
+    for line in txt.splitlines():
+        if "steps:" in line:
+            continue
+        m = re.search(r"(\d+)/(\d+)\s*\[[\d:]+<[\d:]+,\s*([\d.]+)(it/s|s/it)", line)
+        if m:
+            last = m
+    if not last:
+        return None, None
+    return int(last.group(1)), int(last.group(2))
 
 
 def progress():
@@ -1342,6 +1361,15 @@ def compact(W, state, H):
                  f"{DIM}{head_word}{R}"]
         tip = next((c for c in cands if wlen(c) <= W - 1), cands[-1])
         b = [DIM + "─" * W + R, tip]
+    elif st == "训练" and not step:
+        cd, ct = cache_progress()
+        if cd and ct:
+            pct = cd * 100 // ct
+            filled = max(1, min(W, int(W * cd / ct)))
+            b = [DIM + "━" * filled + "─" * max(1, W - filled) + R,
+                 f"{DIM}缓存 latent{R} {BLU}{cd}/{ct}{R} {DIM}{pct}%{R}"]
+        else:
+            b = [DIM + "━" * max(1, W // 2) + "─" * max(1, W - W // 2) + R, f"{DIM}等待数据{R}"]
     elif step and total:
         b = bottom(min(step, total), total, rate, W, batches_done(step))
     else:
