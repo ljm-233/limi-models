@@ -312,6 +312,38 @@ def progress():
     return step, total, rate, losses, log_step, src
 
 
+LORA_DIR = "/home/link/ComfyUI/models/loras"
+
+
+def pretty_model(fname):
+    """machi_sd15_id_v1.safetensors -> 马吉 · sd15 · id · v1"""
+    if not fname:
+        return ""
+    stem = os.path.basename(fname).rsplit(".", 1)[0]
+    parts = stem.split("_")
+    if len(parts) >= 4:
+        head, model, cls, ver = parts[0], parts[1], parts[2], "_".join(parts[3:])
+        pretty = {"machi": "马吉", "aowo": "嗷呜虎虎"}.get(head, head)
+        return f"{pretty} {model}·{cls}·{ver}"
+    return stem
+
+
+def in_use_lora():
+    """当前项目在本机最新装上的那个权重（按文件时间）"""
+    try:
+        proj = read(f"{TRAIN}/.project_name", "machi").strip().split()[0] or "machi"
+    except Exception:
+        proj = "machi"
+    try:
+        fs = [f for f in os.listdir(LORA_DIR) if f.endswith(".safetensors") and f.startswith(proj)]
+        if not fs:
+            return None
+        f = max(fs, key=lambda x: os.path.getmtime(os.path.join(LORA_DIR, x)))
+        return f, os.path.getmtime(os.path.join(LORA_DIR, f))
+    except Exception:
+        return None
+
+
 def latest_weight():
     """最近一次训出来的权重（用来在空闲时显示"上次做到哪"）"""
     try:
@@ -797,7 +829,8 @@ def page_data():
         f"{VIO}半身{R}{WH}{kinds.get('u', 0)}{R}  {ORG}整图{R}{WH}{kinds.get('n', 0)}{R}",
         f"{YEL}标注{R} {WH}{tagged}{R}{DIM}/{len(fs)} 张（{cover}%）{R}",
         f"{CYA}最近改动{R} {BLU}{age}前{R}",
-        f"{DIM}基线{R} {BLU}v3id1{R} {DIM}相似{R}{YEL}0.676{R} {DIM}纹理{R}{YEL}7.33{R}",
+        f"{DIM}在役{R} {BLU}{(pretty_model(in_use_lora()[0]) if in_use_lora() else '—')[:26]}{R}"
+        f" {DIM}基线{R}{YEL}0.676{R}{DIM}/{YEL}7.33{R}",
     ]
 
 
@@ -1151,22 +1184,32 @@ def cycle_size(step):
 
 # ── 排版 ───────────────────────────────────────────────
 def header(st, step, total, n_img, log_step=None, W=80):
+    lora = in_use_lora()
     name = read(f"{TRAIN}/.project_name", "马吉 v3").strip() or "马吉 v3"
+    short = name
+    if lora:
+        full = pretty_model(lora[0])                       # 马吉 sdxl·id·v2
+        short = full.split(" ")[0]                         # 马吉
+        parts_full = full
+    else:
+        parts_full = name
     ep = epoch_display(step, total, n_img)
     tot = total_epochs()
     color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
-    parts = [f"{GRN}●{R}{WH}{name}{R}",
-             f"{DIM}{time.strftime('%H:%M:%S')}{R}",
-             f"{color}{st}{R}"]
-    if ep:
-        parts.append(f"{WH}第{ep}{('/' + str(tot)) if tot else ''}轮{R}")
-    line = " ".join(parts)
-    view = f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
-    if wlen(line + view) <= W:
-        return line + view
-    if wlen(line) <= W:
-        return line
-    return " ".join(parts[::2])      # 极端窄：只留名字和阶段
+    ep_txt = f"{WH}第{ep}{('/' + str(tot)) if tot else ''}轮{R}" if ep else ""
+    view_txt = f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
+
+    # 由长到短逐级尝试：全名 + 秒 + 页名 → 全名 → 只留项目名 → 去掉页名
+    candidates = [
+        f"{GRN}●{R}{WH}{parts_full}{R} {DIM}{time.strftime('%H:%M:%S')}{R} {color}{st}{R} {ep_txt}{view_txt}",
+        f"{GRN}●{R}{WH}{parts_full}{R} {DIM}{time.strftime('%H:%M:%S')}{R} {color}{st}{R} {ep_txt}",
+        f"{GRN}●{R}{WH}{short}{R} {DIM}{time.strftime('%H:%M')}{R} {color}{st}{R} {ep_txt}",
+        f"{GRN}●{R}{WH}{short}{R} {color}{st}{R}",
+    ]
+    for line in candidates:
+        if wlen(line) <= W:
+            return line
+    return candidates[-1]
 
 
 def bottom(step, total, rate, W, cum=0):
@@ -1203,7 +1246,7 @@ def compact(W, state, H):
     n_img = imgs_per_epoch()
     view = state["view"]
     _CUR_VIEW[0] = view
-    rows = [(1, header(st, step, total, n_img, log_step))]
+    rows = [(1, header(st, step, total, n_img, log_step, W))]
     body = []
     if view == 1:
         body = page_flow(step, total, n_img, st, rate)
