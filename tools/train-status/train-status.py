@@ -46,7 +46,8 @@ HOT = "\033[38;2;243;139;168m"
 
 VIEWS = ["环境", "流程", "质量", "数据", "日志", "图片"]
 _CUR_VIEW = [0]
-_NARROW = [False]        # 窗口窄：标签缩写、行距收紧
+_NARROW = [False]
+H_ROWS = [0]                # 当前窗口行数，供分页用        # 窗口窄：标签缩写、行距收紧
 _C = {}
 
 
@@ -573,6 +574,14 @@ def current_run():
     return ""
 
 
+def _sample_count():
+    try:
+        return len([f for f in os.listdir("/home/link/ComfyUI/output")
+                    if f.startswith("eval_") and f.endswith(".png")]) or 4
+    except Exception:
+        return 4
+
+
 def _train_sub(ep, tot):
     durs = epoch_durations()
     if not ep:
@@ -605,7 +614,7 @@ def page_flow(step, total, n_img, st, rate):
         ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
         ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
         ("训练", _train_sub(ep, tot), train_dur if st != "完成" else "已结束"),
-        ("出图", "4 张样图", times.get("出图", "—")),
+        ("出图", f"{cache('nsample', 60, _sample_count)} 张样图", times.get("出图", "—")),
         ("评分", "相似度+纹理", times.get("评分", "—")),
     ]
     now = [r[0] for r in rows].index(st) if st in [r[0] for r in rows] else len(rows)
@@ -725,6 +734,21 @@ def page_quality(W):
     return out
 
 
+def _src_stats():
+    """素材来源：工坊条目的数量（只数目录，不遍历文件；体积由后台脚本记在文件里）"""
+    base = "/mnt/winbot-software/Program Files (x86)/Steam/steamapps/workshop/content/431960"
+    try:
+        n = len([d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))])
+    except Exception:
+        n = 0
+    gb = 0.0
+    try:
+        gb = float(open(f"{TRAIN}/.src_size_gb").read().strip())
+    except Exception:
+        pass
+    return n, gb
+
+
 def _unique_size(files):
     """硬链接会重复计算，按 inode 去重"""
     seen, total = set(), 0
@@ -741,6 +765,7 @@ def _unique_size(files):
 
 
 def page_data():
+    src, src_gb = cache("srcs", 120, lambda: _src_stats())
     fs = glob.glob(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")
     kinds = collections.Counter(os.path.basename(f)[0] for f in fs)
     size = _unique_size(fs)
@@ -749,7 +774,7 @@ def page_data():
     newest = max((os.path.getmtime(f) for f in fs), default=0)
     age = _dur(time.time() - newest) if newest else "—"
     return [
-        f"{CYA}素材{R} {WH}13 套{R} {DIM}·{R} {BLU}53G{R}",
+        f"{CYA}素材{R} {WH}{src} 套{R} {DIM}·{R} {BLU}{src_gb:.0f}G{R}",
         f"{CYA}裁片{R} {WH}{len(fs)}{R} {DIM}张 · {size:.1f}G（去重）{R}",
         f"{GRN}脸{R}{WH}{kinds.get('f', 0)}{R}  {BLU}上身{R}{WH}{kinds.get('b', 0)}{R}  "
         f"{VIO}半身{R}{WH}{kinds.get('u', 0)}{R}  {ORG}整图{R}{WH}{kinds.get('n', 0)}{R}",
@@ -801,7 +826,8 @@ def page_log(W, step, total, losses):
             if len(t) > 8 and not re.search(r"\d+/\d+ \[", t):
                 lines.append(t)
                 break
-    for t in lines[-4:]:
+    rooms = max(2, (H_ROWS[0] or 12) - 6) if H_ROWS[0] else 4
+    for t in lines[-rooms:]:
         col = HOT if ("ERROR" in t or "Killed" in t) else (
             YEL if "WARNING" in t else (GRN if t.startswith("saving") else TXT))
         out.append(f"{col}{t[:max(8, W - 1)]}{R}")
@@ -1154,6 +1180,7 @@ def bottom(step, total, rate, W, cum=0):
 
 def compact(W, state, H):
     _NARROW[0] = (W < 44 or H < 16)
+    H_ROWS[0] = H
     step, total, rate, losses, log_step, src = progress()
     st = cache("stage", 2.0, stage)
     n_img = imgs_per_epoch()
@@ -1204,8 +1231,13 @@ def footer(state, W):
         0: f"{BLU}e/q{R} 翻页 {BLU}c{R} 占用 {BLU}z/Z{R} 尺寸",
     }.get(view, f"{BLU}e/q{R} 翻页 {BLU}z/Z{R} 尺寸 {BLU}p{R} 暂停")
     left = dots
+    if wlen(left) + wlen(hints) + 2 > W:      # 放不下就换短版，不直接砍掉
+        short = {5: f"{BLU}w/s{R}翻图 {BLU}左键{R}原图",
+                 4: f"{BLU}e/q{R}页 {BLU}p{R}暂停",
+                 0: f"{BLU}e/q{R}页 {BLU}c{R}占用"}.get(view, f"{BLU}e/q{R}页 {BLU}z/Z{R}尺寸")
+        hints = short
     if wlen(left) + wlen(hints) + 2 > W:
-        hints = f"{BLU}e/q{R} {BLU}z/Z{R}"
+        hints = f"{BLU}e/q{R}"
     pad = max(1, W - wlen(left) - wlen(hints))
     return left + " " * pad + hints
 
