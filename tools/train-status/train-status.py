@@ -312,6 +312,17 @@ def epochs_of(step, per):
     return (step // per + 1) if (step and per) else 0
 
 
+def epoch_display(step, total, n_img):
+    """统一口径：日志给的是全局批次就按总数算，给的是单轮批次就用翻轮记录"""
+    if not (step and n_img):
+        return 0
+    if total and abs(total - n_img) <= 1:      # 日志 total 就是一轮样本数
+        return epoch_cur(step, n_img)
+    if total and total > n_img * 1.5:          # 日志直接报全局批次
+        return epochs_of(step, n_img)
+    return 0
+
+
 def max_steps():
     """从最新的训练脚本里读 --max_train_steps；读不到就返回 0"""
     fs = sorted(glob.glob(f"{TRAIN}/train_*.sh"), key=os.path.getmtime, reverse=True)
@@ -415,9 +426,21 @@ def page_env(state):
     return out
 
 
+def _norm_dur(v):
+    """把历史里 "8m"/"1h02m" 这类没有秒的写法转成带秒"""
+    if not isinstance(v, str):
+        return v
+    m = re.fullmatch(r"(?:(\d+)h)?(\d+)m", v.strip())
+    if m:
+        h = int(m.group(1) or 0)
+        return _dur(h * 3600 + int(m.group(2)) * 60)
+    return v
+
+
 def _stage_times():
     try:
-        return json.load(open(f"{TRAIN}/stage_times.json"))
+        d = json.load(open(f"{TRAIN}/stage_times.json"))
+        return {k: _norm_dur(v) for k, v in d.items()}
     except Exception:
         return {}
 
@@ -429,10 +452,7 @@ def page_flow(step, total, n_img, st, rate):
     cnt = lambda pat, ttl=60: cache("n:" + pat, ttl, lambda: len(glob.glob(pat)))
     cut = cnt(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")
     tag = cnt(f"{TRAIN}/captions_wd14/*.txt")
-    if absolute_mode(step, total):
-        ep = epochs_of(step, n_img)
-    else:
-        ep = epoch_cur(step, n_img) if (step and n_img) else 0
+    ep = epoch_display(step, total, n_img)
     train_dur = _dur(step / rate) if (step and rate and st == "训练") else times.get("训练", "x")
     rows = [
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "x")),
@@ -461,10 +481,13 @@ def page_flow(step, total, n_img, st, rate):
 
 
 def _dur(sec):
-    sec = int(sec)
+    """时长统一到秒：45s / 8m12s / 1h02m03s"""
+    sec = max(0, int(sec))
     if sec >= 3600:
-        return f"{sec // 3600}h{sec % 3600 // 60:02d}m"
-    return f"{sec // 60}m" if sec >= 60 else f"{sec}s"
+        return f"{sec // 3600}h{sec % 3600 // 60:02d}m{sec % 60:02d}s"
+    if sec >= 60:
+        return f"{sec // 60}m{sec % 60:02d}s"
+    return f"{sec}s"
 
 
 _SPARK = "▁▂▃▄▅▆▇█"
@@ -821,12 +844,7 @@ def cycle_size(step):
 def header(st, step, total, n_img, log_step=None):
     name = read(f"{TRAIN}/.project_name", "马吉 v3").strip() or "马吉 v3"
     ls = log_step if log_step is not None else step
-    if n_img and total and abs(total - n_img) <= 1:      # 日志的 total 就是一轮的样本数
-        ep = epochs_of(step, n_img)
-    elif n_img and total and total > n_img * 1.5:        # 日志直接报全局批次
-        ep = epochs_of(step, n_img)
-    else:
-        ep = 0
+    ep = epoch_display(step, total, n_img)
     color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
     tail = f" {color}{st}{R}" + (f" {WH}第{ep}轮{R}" if ep else "")
     tail += f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
