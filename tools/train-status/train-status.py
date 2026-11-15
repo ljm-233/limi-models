@@ -46,6 +46,7 @@ HOT = "\033[38;2;243;139;168m"
 
 VIEWS = ["环境", "流程", "质量", "数据", "日志", "图片"]
 _CUR_VIEW = [0]
+_NARROW = [False]        # 窗口窄：标签缩写、行距收紧
 _C = {}
 
 
@@ -494,6 +495,22 @@ def disk(path="/home/link"):
 def page_env(state):
     used, total, swap = mem()
     pct = used / total * 100
+    if _NARROW[0]:
+        out = []
+        c, t = cpu_pct(), cpu_temp()
+        out.append(f"{CYA}CPU{R}{heat(c, 60, 85)}{c:>3}%{R}"
+                   + (f" {heat(t, 70, 85)}{t:.0f}℃{R}" if t else ""))
+        g = gpu()
+        if g:
+            u, mu, tot_g, gt, pw, lim = g
+            out.append(f"{VIO}GPU{R}{heat(u, 80, 97)}{u:>3}%{R} {BLU}{mu:.1f}G{R}"
+                       f" {heat(gt, 72, 82)}{gt}℃{R}")
+        out.append(f"{YEL}内存{R}{heat(pct, 70, 88)}{used:.1f}G{R}")
+        age = log_age()
+        if age is not None:
+            col = GRN if age < 20 else (YEL if age < 90 else HOT)
+            out.append(f"{VIO}日志{R}{col}{age}s{R}")
+        return out
     out = [line_cpu(), line_gpu(),
            f"{YEL}内存{R} {heat(pct, 70, 88)}{used:.1f}{DIM}/{total:.1f}G{R} "
            f"{DIM}交换{R}{heat(swap, 2, 6)}{swap:.1f}G{R}"]
@@ -561,7 +578,7 @@ def _train_sub(ep, tot):
     if not ep:
         return ""
     s = f"第{ep}{('/' + str(tot)) if tot else ''}轮"
-    if durs:
+    if durs and not _NARROW[0]:
         s += f" · 上轮{_dur(durs[-1])}"
         if len(durs) > 1:
             s += f" · 均{_dur(sum(durs) // len(durs))}"
@@ -601,10 +618,11 @@ def page_flow(step, total, n_img, st, rate):
         else:
             mark, ncol = DIM + "·" + R, DIM
         body = f"{mark} {ncol}{name}{R}"
-        if sub:
+        if sub and not _NARROW[0]:
             body += f" {BLU}{sub}{R}"
         dcol = GRN if dur not in ("—", "", None) else DIM
-        pad = " " * max(1, 34 - wlen(body))
+        width = 26 if _NARROW[0] else 34
+        pad = " " * max(1, width - wlen(body))
         out.append(body + pad + f"{dcol}{dur}{R}")
     return out
 
@@ -668,10 +686,14 @@ def page_quality(W):
             sch = re.search(r"--lr_scheduler (\S+)", sh)
             out.append(f"{VIO}学习率{R} {WH}{lr.group(1)}{R} {DIM}{sch.group(1) if sch else ''}{R}")
         if res:
-            out.append(f"{CYA}本版{R}{BLU}{os.path.basename(script_for_run())}{R} "
-                       f"{DIM}{res.group(1)}px dim{R}{WH}{dim.group(1) if dim else '-'}{R} "
-                       f"{DIM}b{R}{WH}{bs.group(1) if bs else '-'}{R} "
-                       f"{DIM}目标{R}{WH}{ms.group(1) if ms else '-'}{R}")
+            if _NARROW[0]:
+                out.append(f"{CYA}本版{R}{BLU}{res.group(1)}px{R} "
+                           f"{DIM}目标{R}{WH}{ms.group(1) if ms else '-'}{R}")
+            else:
+                out.append(f"{CYA}本版{R}{BLU}{os.path.basename(script_for_run())}{R} "
+                           f"{DIM}{res.group(1)}px dim{R}{WH}{dim.group(1) if dim else '-'}{R} "
+                           f"{DIM}b{R}{WH}{bs.group(1) if bs else '-'}{R} "
+                           f"{DIM}目标{R}{WH}{ms.group(1) if ms else '-'}{R}")
 
     name = current_run()
     cks = [f for f in glob.glob(f"{TRAIN}/out_*/*-step*.safetensors")
@@ -1026,6 +1048,15 @@ def cycle_size(step):
 
 # ── 排版 ───────────────────────────────────────────────
 def header(st, step, total, n_img, log_step=None):
+    if _NARROW[0]:
+        ep = epoch_display(step, total, n_img)
+        color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
+        s = f"{GRN}●{R}{WH}{time.strftime('%H:%M')}{R} {color}{st}{R}"
+        if ep:
+            tot = total_epochs()
+            s += f" {WH}{ep}{('/' + str(tot)) if tot else ''}轮{R}"
+        return s
+
     name = read(f"{TRAIN}/.project_name", "马吉 v3").strip() or "马吉 v3"
     ls = log_step if log_step is not None else step
     ep = epoch_display(step, total, n_img)
@@ -1064,6 +1095,7 @@ def bottom(step, total, rate, W, cum=0):
 
 
 def compact(W, state, H):
+    _NARROW[0] = (W < 44 or H < 16)
     step, total, rate, losses, log_step, src = progress()
     st = cache("stage", 2.0, stage)
     n_img = imgs_per_epoch()
@@ -1082,13 +1114,14 @@ def compact(W, state, H):
     elif view == 0:
         body = page_env(state)
     _CUR_VIEW[0] = view
-    r = 3
-    stop = max(3, H - 3)
+    r = 2
+    stop = max(2, H - 2)
+    gap = 1 if (H < 20 or _NARROW[0]) else 2
     for line in body:
         if r > stop:
             break
         rows.append((r, line))
-        r += 2
+        r += gap
     # 底部给整体进度：累计批次 vs 总批次（= 优化步 × 梯度累积）；拿不到就退回日志自己的数字
     if step and total:
         b = bottom(min(step, total), total, rate, W, _CUM)
@@ -1104,6 +1137,8 @@ DEL_IMG = "\033_Ga=d,d=A\033\\"
 def footer(state, W):
     """最后一行：页点 + 当前页快捷键提示"""
     view = state["view"]
+    if W < 42:
+        return "".join(f"{WH}●{R}" if i == view else f"{DIM}○{R}" for i in range(6))
     dots = "".join(f"{WH}●{R}" if i == view else f"{DIM}○{R}" for i in range(6))
     hints = {
         5: f"{BLU}w/s{R} 翻图 {BLU}滚轮{R} 翻图 {BLU}左键{R} 原图",
