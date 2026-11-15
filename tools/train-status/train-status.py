@@ -351,6 +351,38 @@ def epoch_display(step, total, n_img):
     return _CUM // n_img + 1
 
 
+def grad_accum():
+    m = re.search(r"--gradient_accumulation_steps (\d+)", read(script_for_run()))
+    return max(1, int(m.group(1))) if m else 1
+
+
+def total_epochs():
+    """总轮数 = 总批次 / 每轮批次，向上取整"""
+    per, ms = imgs_per_epoch(), max_steps()
+    if not (per and ms):
+        return 0
+    return -(-(ms * grad_accum()) // per)
+
+
+def full_log_text(path):
+    try:
+        return open(path, "rb").read().decode("utf-8", "ignore").replace("\r", "\n")
+    except Exception:
+        return ""
+
+
+def epoch_durations():
+    """每轮耗时：日志里 '2959/2959 [18:45<' 这种跑满一轮的行能直接量出来"""
+    out = []
+    for line in full_log_text(last_log() or "").split("\n"):
+        m = re.search(r"(\d+)/\1\s*\[\s*(\d+):(\d+)<", line)
+        if m:
+            v = int(m.group(2)) * 60 + int(m.group(3))
+            if v > 0:
+                out.append(v)
+    return out[-8:]
+
+
 def max_steps():
     """从最新的训练脚本里读 --max_train_steps；读不到就返回 0"""
     fs = sorted(glob.glob(f"{TRAIN}/train_*.sh"), key=os.path.getmtime, reverse=True)
@@ -532,6 +564,7 @@ def page_flow(step, total, n_img, st, rate):
     cut = cnt(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")
     tag = cnt(f"{TRAIN}/captions_wd14/*.txt")
     ep = epoch_display(step, total, n_img)
+    tot = total_epochs()
 
     if st == "训练" and step and rate:
         train_dur = _dur(step / rate)
@@ -542,7 +575,8 @@ def page_flow(step, total, n_img, st, rate):
         ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "—")),
         ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
         ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
-        ("训练", f"第{ep}轮" if ep else "", train_dur),
+        ("训练", (f"第{ep}轮" + (f" · 上轮{_dur(epoch_durations()[-1])}" if epoch_durations() else "")) if ep else "",
+         train_dur),
         ("出图", "4 张样图", times.get("出图", "—")),
         ("评分", "相似度+纹理", times.get("评分", "—")),
     ]
@@ -977,8 +1011,10 @@ def header(st, step, total, n_img, log_step=None):
     name = read(f"{TRAIN}/.project_name", "马吉 v3").strip() or "马吉 v3"
     ls = log_step if log_step is not None else step
     ep = epoch_display(step, total, n_img)
+    tot = total_epochs()
     color = {"训练": CYA, "出图": YEL, "评分": VIO, "完成": GRN}.get(st, DIM)
-    tail = f" {color}{st}{R}" + (f" {WH}第{ep}轮{R}" if ep else "")
+    tot = total_epochs()
+    tail = f" {color}{st}{R}" + (f" {WH}第{ep}{('/' + str(tot)) if tot else ''}轮{R}" if ep else "")
     tail += f" {DIM}· {VIEWS[_CUR_VIEW[0]]}{R}"
     return f"{GRN}●{R} {WH}{name}{R} {DIM}{time.strftime('%H:%M:%S')}{R}{tail}"
 
