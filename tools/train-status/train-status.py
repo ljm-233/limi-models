@@ -410,6 +410,27 @@ def line_gpu():
     return s + (f" {ORG}{pw:.0f}{DIM}/{lim:.0f}W{R}" if lim else f" {ORG}{pw:.0f}W{R}")
 
 
+def log_age():
+    """日志最后一次写入距今多少秒——判断训练是不是卡住了"""
+    p = last_log()
+    if not p:
+        return None
+    try:
+        return max(0, int(time.time() - os.path.getmtime(p)))
+    except Exception:
+        return None
+
+
+def disk(path="/home/link"):
+    try:
+        st = os.statvfs(path)
+        free = st.f_bavail * st.f_frsize / 2**30
+        tot = st.f_blocks * st.f_frsize / 2**30
+        return free, tot
+    except Exception:
+        return None, None
+
+
 def page_env(state):
     used, total, swap = mem()
     pct = used / total * 100
@@ -421,8 +442,19 @@ def page_env(state):
     else:
         out.append(f"{GRN}出图{R} {GRN}在线{R}" if cache("comfy", 3, comfy_online)
                    else f"{DIM}出图 · 离线{R}")
+
+    age = log_age()
     p = last_log()
-    out.append(f"{VIO}日志{R} {BLU}{os.path.basename(p) if p else '—'}{R}")
+    name = os.path.basename(p) if p else "—"
+    if age is None:
+        out.append(f"{VIO}日志{R} {BLU}{name}{R}")
+    else:
+        col = GRN if age < 20 else (YEL if age < 90 else HOT)
+        out.append(f"{VIO}日志{R} {BLU}{name}{R} {col}{age}s前{R}")
+
+    free, tot = disk()
+    if free is not None:
+        out.append(f"{CYA}磁盘{R} {heat(100 * free / tot, 60, 85)}{free:.0f}{DIM}/{tot:.0f}G{R}")
     return out
 
 
@@ -445,6 +477,25 @@ def _stage_times():
         return {}
 
 
+def current_run():
+    """从正在跑的进程里取输出名和脚本，用来判断"当前这一版"是谁"""
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            args = open(f"/proc/{pid}/cmdline", "rb").read().decode("utf-8", "ignore").split("\0")
+        except Exception:
+            continue
+        if not any(a.endswith("train_network.py") for a in args):
+            continue
+        name = ""
+        for i, a in enumerate(args):
+            if a == "--output_name" and i + 1 < len(args):
+                name = args[i + 1]
+        return name or ""
+    return ""
+
+
 def page_flow(step, total, n_img, st, rate):
     times = _stage_times()
     src = cache("src", 60, lambda: max(0, sum(1 for _ in open(f"{TRAIN}/report_v3.csv")) - 1)
@@ -453,14 +504,19 @@ def page_flow(step, total, n_img, st, rate):
     cut = cnt(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")
     tag = cnt(f"{TRAIN}/captions_wd14/*.txt")
     ep = epoch_display(step, total, n_img)
-    train_dur = _dur(step / rate) if (step and rate and st == "训练") else times.get("训练", "x")
+
+    if st == "训练" and step and rate:
+        train_dur = _dur(step / rate)
+    else:
+        train_dur = times.get("训练", "—")
+
     rows = [
-        ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "x")),
-        ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "x")),
-        ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "x")),
+        ("扫描", f"{src} 张原图" if src else "", times.get("扫描", "—")),
+        ("切图", f"{cut} 张裁片" if cut else "", times.get("切图", "—")),
+        ("打标", f"{tag} 条描述" if tag else "", times.get("打标", "—")),
         ("训练", f"第{ep}轮" if ep else "", train_dur),
-        ("出图", "4 张样图", times.get("出图", "x")),
-        ("评分", "相似度+纹理", times.get("评分", "x")),
+        ("出图", "4 张样图", times.get("出图", "—")),
+        ("评分", "相似度+纹理", times.get("评分", "—")),
     ]
     now = [r[0] for r in rows].index(st) if st in [r[0] for r in rows] else len(rows)
     out = []
@@ -474,7 +530,7 @@ def page_flow(step, total, n_img, st, rate):
         body = f"{mark} {ncol}{name}{R}"
         if sub:
             body += f" {BLU}{sub}{R}"
-        dcol = GRN if dur not in ("x", "") else DIM
+        dcol = GRN if dur not in ("—", "", None) else DIM
         pad = " " * max(1, 34 - wlen(body))
         out.append(body + pad + f"{dcol}{dur}{R}")
     return out
@@ -500,6 +556,17 @@ class _SparkColor:
 _SPARK_COLOR = _SparkColor()
 
 
+def script_for_run():
+    """挑当前这版对应的训练脚本；找不到就退回最新的"""
+    name = current_run()
+    fs = sorted(glob.glob(f"{TRAIN}/train_*.sh"), key=os.path.getmtime, reverse=True)
+    if name:
+        for f in fs:
+            if f"output_name {name}" in read(f):
+                return f
+    return fs[0] if fs else ""
+
+
 def page_quality(W):
     out = []
     vals = loss_series(min(max(8, W - 12), 32))
@@ -509,35 +576,41 @@ def page_quality(W):
         spark = "".join(f"{_SPARK_COLOR[(v - lo) / span]}{_SPARK[min(7, int((v - lo) / span * 7))]}{R}"
                         for v in vals)
         out.append(f"{CYA}loss{R} {spark}")
-        drop = vals[-1] - vals[0]
-        trend = f"{GRN}↓{R}" if drop < 0 else (f"{HOT}↑{R}" if drop > 0 else f"{DIM}→{R}")
-        out.append(f"{DIM}当前{R} {WH}{vals[-1]:.4f}{R} {trend} "
+        k = max(1, len(vals) // 10)
+        head, tail = sum(vals[:k]) / k, sum(vals[-k:]) / k
+        trend = f"{GRN}↓{R}" if tail < head - 1e-4 else (f"{HOT}↑{R}" if tail > head + 1e-4 else f"{DIM}→{R}")
+        out.append(f"{DIM}当前{R}{WH}{vals[-1]:.4f}{R} {trend} "
                    f"{DIM}最低{R}{GRN}{lo:.4f}{R} {DIM}最高{R}{BLU}{hi:.4f}{R}")
     else:
-        out.append(f"{CYA}loss{R} {DIM}还没有数据{R}")
-    for cand in (f"{TRAIN}/train_v5face.sh", f"{TRAIN}/train_v3wd14.sh"):
-        sh = read(cand)
+        out.append(f"{CYA}loss{R} {DIM}本轮日志没输出 avr_loss{R}")
+
+    sh = read(script_for_run())
+    if sh:
         lr = re.search(r"--learning_rate (\S+)", sh)
-        if lr:
-            sch = re.search(r"--lr_scheduler (\S+)", sh)
-            out.append(f"{VIO}学习率{R} {WH}{lr.group(1)}{R} {DIM}{sch.group(1) if sch else ''}{R}")
-            break
-    for cand in (f"{TRAIN}/train_v5face.sh", f"{TRAIN}/train_v3wd14.sh"):
-        sh = read(cand)
-        if not sh:
-            continue
         res = re.search(r"--resolution (\d+)", sh)
         dim = re.search(r"--network_dim (\d+)", sh)
         bs = re.search(r"--train_batch_size (\d+)", sh)
+        ms = re.search(r"--max_train_steps (\d+)", sh)
+        if lr:
+            sch = re.search(r"--lr_scheduler (\S+)", sh)
+            out.append(f"{VIO}学习率{R} {WH}{lr.group(1)}{R} {DIM}{sch.group(1) if sch else ''}{R}")
         if res:
-            out.append(f"{CYA}本版{R} {WH}{os.path.basename(cand)}{R} {DIM}{res.group(1)}px{R} "
-                       f"{DIM}dim{R}{BLU}{dim.group(1) if dim else '-'}{R} "
-                       f"{DIM}batch{R}{BLU}{bs.group(1) if bs else '-'}{R}")
-            break
+            out.append(f"{CYA}本版{R}{BLU}{os.path.basename(script_for_run())}{R} "
+                       f"{DIM}{res.group(1)}px dim{R}{WH}{dim.group(1) if dim else '-'}{R} "
+                       f"{DIM}b{R}{WH}{bs.group(1) if bs else '-'}{R} "
+                       f"{DIM}目标{R}{WH}{ms.group(1) if ms else '-'}{R}")
 
-    name, mb = latest_ckpt()
-    if name:
-        out.append(f"{ORG}存档{R} {BLU}{name}{R} {DIM}{mb:.0f}MB{R}")
+    name = current_run()
+    cks = [f for f in glob.glob(f"{TRAIN}/out_*/*-step*.safetensors")
+           if not name or os.path.basename(f).startswith(name)]
+    if cks:
+        f = max(cks, key=os.path.getmtime)
+        step_n = re.search(r"-step(\d+)", os.path.basename(f))
+        out.append(f"{ORG}存档{R}{BLU}{step_n.group(1) if step_n else '?'}{R}"
+                   f"{DIM}步{R} {DIM}{os.path.getsize(f) / 1048576:.0f}MB{R}")
+    else:
+        out.append(f"{ORG}存档{R} {DIM}还没有{R}")
+
     rep = last_report()
     if rep:
         sc = GRN if rep[1] >= 0.66 else (YEL if rep[1] >= 0.60 else HOT)
@@ -549,60 +622,91 @@ def page_quality(W):
     return out
 
 
+def _unique_size(files):
+    """硬链接会重复计算，按 inode 去重"""
+    seen, total = set(), 0
+    for f in files:
+        try:
+            st = os.stat(f)
+        except Exception:
+            continue
+        if st.st_ino in seen:
+            continue
+        seen.add(st.st_ino)
+        total += st.st_size
+    return total / 2**30
+
+
 def page_data():
     fs = glob.glob(f"{TRAIN}/dataset_v3_base/10_machi/*.jpg")
     kinds = collections.Counter(os.path.basename(f)[0] for f in fs)
-    size = sum(os.path.getsize(f) for f in fs) / 2**30 if fs else 0
-    tag = len(glob.glob(f"{TRAIN}/captions_wd14/*.txt"))
+    size = _unique_size(fs)
+    tagged = sum(1 for f in fs if os.path.exists(f[:-4] + ".txt"))
+    cover = (100 * tagged // len(fs)) if fs else 0
+    newest = max((os.path.getmtime(f) for f in fs), default=0)
+    age = _dur(time.time() - newest) if newest else "—"
     return [
         f"{CYA}素材{R} {WH}13 套{R} {DIM}·{R} {BLU}53G{R}",
-        f"{CYA}裁片{R} {WH}{len(fs)}{R} {DIM}张{R}",
+        f"{CYA}裁片{R} {WH}{len(fs)}{R} {DIM}张 · {size:.1f}G（去重）{R}",
         f"{GRN}脸{R}{WH}{kinds.get('f', 0)}{R}  {BLU}上身{R}{WH}{kinds.get('b', 0)}{R}  "
         f"{VIO}半身{R}{WH}{kinds.get('u', 0)}{R}  {ORG}整图{R}{WH}{kinds.get('n', 0)}{R}",
-        f"{YEL}标注{R} {WH}{tag}{R} {DIM}条 WD14{R}",
-        f"{CYA}体积{R} {BLU}{size:.1f}G{R}",
-        f"{DIM}基线{R} {BLU}v3id{R} {DIM}相似{R}{YEL}0.676{R} {DIM}纹理{R}{YEL}7.33{R}",
+        f"{YEL}标注{R} {WH}{tagged}{R}{DIM}/{len(fs)} 张（{cover}%）{R}",
+        f"{CYA}最近改动{R} {BLU}{age}前{R}",
+        f"{DIM}基线{R} {BLU}v3id1{R} {DIM}相似{R}{YEL}0.676{R} {DIM}纹理{R}{YEL}7.33{R}",
     ]
 
 
 def page_log(W, step, total, losses):
     path = last_log() or ""
-    key = ("INFO", "WARNING", "ERROR", "Error", "Traceback", "saving", "checkpoint", "OOM", "Killed", "nan")
+    raw = log_text(path)
+    errs = warn = 0
+    want = ("INFO", "WARNING", "ERROR", "Error", "Traceback", "saving", "checkpoint", "OOM", "Killed")
     lines = []
-    for raw in log_text(path).split("\n"):
-        t = re.sub(r"\s{2,}", " ", raw).strip()
-        if len(t) < 6 or t.startswith("steps:") or not any(k in t for k in key):
+    for chunk in raw.split("\n"):
+        t = re.sub(r"\s{2,}", " ", chunk).strip()
+        if len(t) < 6 or t.startswith("steps:") or re.search(r"\d+/\d+ \[\d+:", t):
             continue
-        t = re.sub(r"^(INFO|WARNING|ERROR)\s*\[RANK \d+\]\s*", r"\1 ", t)
+        if re.search(r"it/s\]|s/it\]", t) or not re.search(r"[A-Za-z]{3,}", t):
+            continue                      # 进度条被 \r 拆出来的碎片，别当成日志行
+        if "ERROR" in t or "Traceback" in t or "Killed" in t:
+            errs += 1
+        elif "WARNING" in t:
+            warn += 1
+        if not any(k in t for k in want):
+            continue
         t = re.sub(r"\s+[a-z_]+\.py:\d+$", "", t)
-        t = re.sub(r"^saving checkpoint: .*/([^/]+)$", r"saving checkpoint: \1", t)
-        if not lines or lines[-1] != t:
-            lines.append(t)
-    out = [f"{DIM}日志{R} {DIM}{os.path.basename(path) or '—'}{R}"]
-    if step and total:
-        ls = f" {DIM}loss{R} {WH}{losses[-1]:.4f}{R}" if losses else ""
-        out.append(f"{DIM}进度{R} {WH}{step}/{total}{R}{ls}")
-    if not lines:
-        for raw in reversed(log_text(path).split("\n")):
-            t = re.sub(r"\s{2,}", " ", raw).strip()
-            if len(t) > 8 and not t.startswith("steps:"):
+        t = re.sub(r"^saving checkpoint: .*/([^/]+)$", r"saving: \1", t)
+        if lines and lines[-1] == t:
+            continue
+        lines.append(t)
+
+    age = log_age()
+    head = f"{VIO}日志{R} {BLU}{os.path.basename(path) or '—'}{R}"
+    if age is not None:
+        col = GRN if age < 20 else (YEL if age < 90 else HOT)
+        head += f" {col}{age}s前{R}"
+
+    bad = f"{HOT}错{errs}{R}" if errs else f"{DIM}错 0{R}"
+    mid = f"{DIM}进度{R}{WH}{step or 0}{DIM}/{total or 0}{R} {bad} {YEL if warn else DIM}警 {warn}{R}"
+    if losses:
+        mid += f" {DIM}loss{R}{WH}{losses[-1]:.4f}{R}"
+    out = [head, mid]
+
+    if not lines:                                   # 没有关键行就退一步：给最近一条非进度行
+        for chunk in reversed(raw.split("\n")):
+            t = re.sub(r"\s{2,}", " ", chunk).strip()
+            if len(t) > 8 and not re.search(r"\d+/\d+ \[", t):
                 lines.append(t)
                 break
-    room = max(1, 6 - (1 if (step and total) else 0))
-    for t in lines[-room:]:
-        if "ERROR" in t or "Traceback" in t or "Killed" in t:
-            col = HOT
-        elif "WARNING" in t:
-            col = YEL
-        elif "saving" in t or "checkpoint" in t:
-            col = GRN
-        else:
-            col = TXT
+    for t in lines[-4:]:
+        col = HOT if ("ERROR" in t or "Killed" in t) else (
+            YEL if "WARNING" in t else (GRN if t.startswith("saving") else TXT))
         out.append(f"{col}{t[:max(8, W - 1)]}{R}")
+    if len(out) == 2 and not lines:
+        out.append(f"{DIM}这一版日志里没有关键行{R}")
     return out
 
 
-# ── 图片页 ─────────────────────────────────────────────
 def image_list():
     """必须和 photo-view.sh / imv 用同一份清单，否则索引错位"""
     def _load():
@@ -856,15 +960,21 @@ def bottom(step, total, rate, W):
         return [DIM + "━" * max(1, W // 2) + "─" * max(1, W - W // 2) + R, f"{DIM}等待数据{R}"]
     pct = step * 100 // total
     filled = max(1, min(W, int(W * step / total)))
-    bar = f"{CYA}{'━' * filled}{R}{DIM}{'─' * max(0, W - filled)}{R}"
+    # 进度条本身就是渐变色：起步青、中段蓝、后段紫，走完变绿
+    bar_col = GRN if pct >= 100 else (VIO if pct >= 75 else (BLU if pct >= 40 else CYA))
+    bar = f"{bar_col}{'━' * filled}{R}{DIM}{'─' * max(0, W - filled)}{R}"
     left = max(0, int((total - step) / rate))
     h, m, sec = left // 3600, left % 3600 // 60, left % 60
     remain = f"{h}h{m:02d}m{sec:02d}s" if h else f"{m}m{sec:02d}s"
     eta = time.strftime("%H:%M:%S", time.localtime(time.time() + left))
-    for txt in (f"{WH}{step}/{total}{R} {WH}{pct}%{R} {DIM}剩{R} {WH}{remain}{R} {DIM}至{R} {WH}{eta}{R}",
-                f"{WH}{step}/{total}{R} {WH}{pct}%{R} {DIM}剩{R}{WH}{remain}{R} {DIM}至{R}{WH}{eta}{R}",
-                f"{WH}{step}/{total}{R} {WH}{pct}%{R} {DIM}剩{R}{WH}{remain}{R}",
-                f"{WH}{step}/{total}{R} {WH}{pct}%{R}"):
+    pc = GRN if pct >= 100 else (VIO if pct >= 75 else (BLU if pct >= 40 else CYA))
+    left_col = HOT if left > 1800 else (YEL if left > 600 else GRN)
+    speed = f" {DIM}{rate:.2f}it/s{R}" if rate else ""
+    for txt in (f"{WH}{step}{DIM}/{total}{R} {pc}{pct}%{R} {DIM}剩{R}{left_col}{remain}{R} "
+                f"{DIM}至{R}{BLU}{eta}{R}{speed}",
+                f"{WH}{step}{DIM}/{total}{R} {pc}{pct}%{R} {DIM}剩{R}{left_col}{remain}{R} {DIM}至{R}{BLU}{eta}{R}",
+                f"{WH}{step}{DIM}/{total}{R} {pc}{pct}%{R} {DIM}剩{R}{left_col}{remain}{R}",
+                f"{WH}{step}{DIM}/{total}{R} {pc}{pct}%{R}"):
         if wlen(txt) <= W:
             break
     return [bar, txt]
@@ -1005,7 +1115,11 @@ def main():
                     rows, _, _ = compact(W, state, H)
                     draw(rows, W)
                     state["drawn"] = None
-                nxt = time.time() + (1.0 if W < 62 else 3.0)
+                try:
+                    iv = float(os.environ.get("TRAIN_STATUS_INTERVAL", "") or 1.0)
+                except Exception:
+                    iv = 1.0
+                nxt = time.time() + max(0.2, iv)     # 默认每秒刷一次
 
             wait = max(0.05, nxt - time.time())
             if keys == "0" or not select.select([fd], [], [], wait)[0]:
