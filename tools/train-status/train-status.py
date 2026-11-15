@@ -312,6 +312,18 @@ def progress():
     return step, total, rate, losses, log_step, src
 
 
+def latest_weight():
+    """最近一次训出来的权重（用来在空闲时显示"上次做到哪"）"""
+    try:
+        outs = glob.glob(f"{TRAIN}/out_*/*.safetensors")
+        if not outs:
+            return None
+        f = max(outs, key=os.path.getmtime)
+        return os.path.basename(f), os.path.getmtime(f), os.path.getsize(f) / 1048576
+    except Exception:
+        return None
+
+
 def stage():
     if alive("train_network"):
         return "训练"
@@ -509,7 +521,7 @@ def disk(path="/home/link"):
         return None, None
 
 
-def page_env(state):
+def page_env(state, st="待机"):
     used, total, swap = mem()
     pct = used / total * 100
     out = [line_cpu(), line_gpu(),
@@ -529,6 +541,11 @@ def page_env(state):
     else:
         col = GRN if age < 20 else (YEL if age < 90 else HOT)
         out.append(f"{VIO}日志{R} {BLU}{name}{R} {col}{age}s前{R}")
+
+    lw = latest_weight()
+    if lw and st == "完成":
+        name, mt, mb = lw
+        out.append(f"{YEL}上次{R} {BLU}{name[:max(10, 30)]}{R} {DIM}{mb:.0f}MB · {_dur(time.time() - mt)}前{R}")
 
     free, tot = disk()
     if free is not None:
@@ -1197,7 +1214,7 @@ def compact(W, state, H):
     elif view == 4:
         body = page_log(W, step, total, losses)
     elif view == 0:
-        body = page_env(state)
+        body = page_env(state, st)
     _CUR_VIEW[0] = view
     r = 2
     stop = max(2, H - 2)
