@@ -3,7 +3,7 @@
 # 用法: gen_best.sh <前缀> <提示词> <seed...>
 set -u
 PREFIX="${1:?前缀}"; PROMPT="${2:?提示词}"; shift 2
-REF=/home/link/.dsh/miyu/train/refs_crop/r1.png
+REF=/home/link/.dsh/miyu/train/refs_machi/r1.png   # 马吉本人的脸，别再指向 refs_crop（那是嗷嗷的）
 MODE="${GEN_MODE:-sd15}"      # sd15 = 当前最优；sdxl = 老路线
 NEG="cartoon, anime, 3d, plastic skin, blurry, watermark, text, extra limbs"
 for sd in "$@"; do
