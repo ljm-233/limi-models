@@ -446,6 +446,15 @@ def idle_now():
     return age is None or age > 600
 
 
+def dataset_count():
+    """当前这一版训练数据有多少张（优先数据集目录，其次清单）"""
+    for pat in ("dataset_v6face/10_machi/*.png", "dataset_v3_png/10_machi/*.png"):
+        n = len(glob.glob(f"{TRAIN}/{pat}"))
+        if n:
+            return n
+    return 0
+
+
 def crop_progress():
     """无损切图进度：已出 PNG / 预计总数（当前清单源图数 × 4 类）"""
     try:
@@ -895,7 +904,10 @@ def page_flow(step, total, n_img, st, rate):
     if st in ("出图", "评分", "完成") and lw_name:
         train_sub = f"已结束 · {lw_name}"
 
+    # 数据集/清单这一版是多少张，供第一步展示
+    dset = dataset_count()
     rows = [
+        ("更新工具信息", f"清单 {src} 张 · 本版 {dset} 张", ""),
         ("扫描", f"{src} 张原图" if src else "", stage_time("扫描") or times.get("扫描", "—")),
         ("切图", (f"无损 {crop_progress()[0]} 张" if st == "切图" else (f"{cut} 张裁片" if cut else "")),
          stage_time("切图") or times.get("切图", "—")),
