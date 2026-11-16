@@ -1504,9 +1504,10 @@ def header(st, step, total, n_img, log_step=None, W=80):
     # 标题优先显示「这一版在做的」：正在训的 > 目标已定但还没开跑 > 在役权重
     run = cache("currun", 5, current_run)
     pend = cache("pend", 30, pending_output)
+    run_name = (run[1] if isinstance(run, (list, tuple)) and len(run) > 1 else (run or ""))
     target = ""
-    if run and run[1]:
-        target = run[1]
+    if run_name:
+        target = run_name
     elif pend and st in ("切图", "训练"):
         target = pend
     full = pretty_model((target or (lora[0] if lora else "")) + ".safetensors") if (target or lora) else name
