@@ -8,7 +8,7 @@ import glob, numpy as np, cv2
 
 LORA_DIR = "/home/link/ComfyUI/models/loras"
 TRAIN = "/home/link/.dsh/miyu/train"
-REF_GLOB = "/home/link/.dsh/miyu/train/refs_crop/*.png"
+REF_GLOB = "/home/link/.dsh/miyu/train/refs_machi/*.png"
 DOC = "/home/link/.dsh/miyu/limi-models/machi/v3.md"
 C = "http://127.0.0.1:8188"
 PROMPT = sys.argv[3] if len(sys.argv) > 3 else \
@@ -47,7 +47,7 @@ def score(paths):
     from insightface.app import FaceAnalysis
     app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
     app.prepare(ctx_id=-1, det_size=(640, 640))
-    c = np.load(f"{TRAIN}/face_centroid.npy").reshape(-1)
+    c = np.load(f"{TRAIN}/face_centroid_machi.npy").reshape(-1)
     refs = []
     for f in glob.glob(REF_GLOB):
         img = cv2.imread(f)
@@ -67,6 +67,17 @@ def score(paths):
     return (float(np.mean(sims)) if sims else 0.0,
             float(np.mean(simc)) if simc else 0.0,
             float(np.mean(tex)) if tex else 0.0)
+
+
+def stop_comfy():
+    """评估完把 ComfyUI 关掉，别占着 2.5G 显存害训练 OOM"""
+    try:
+        out = subprocess.run(["bash", "-c", "pgrep -f 'main.py --listen'"], capture_output=True, text=True).stdout.split()
+        for pid in out:
+            subprocess.run(["kill", pid], check=False)
+        print("ComfyUI 已关闭，显存腾给训练")
+    except Exception as e:
+        print("关 ComfyUI 失败：", e)
 
 
 def main():
@@ -92,6 +103,8 @@ def main():
     print(f"{name}: 对真人 {a:.3f} 对均值脸 {b:.3f} 纹理 {t:.2f}（{len(made)} 张）")
     return 0
 
+
+stop_comfy()
 
 if __name__ == "__main__":
     sys.exit(main())
